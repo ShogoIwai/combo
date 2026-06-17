@@ -241,6 +241,117 @@ Both servers share the same shape of knobs (`CODEX_*` / `CLAUDE_*`):
 
 ---
 
+## Claude Code rg-cleanup `Stop` hook (insurance)
+
+With the fork model, neither agent runs search tooling at the multi-repo root, so
+the old root-level `rg .` fallback that orphaned `rg` processes should not fire.
+The `Stop` hook below is kept as **belt-and-suspenders only** — it costs nothing
+and still reaps any stray `rg` from other sources when a Claude Code session ends.
+
+Add to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "MY_SID=$(ps -p $$ -o sid= 2>/dev/null | tr -d ' '); pgrep -u \"$(id -un)\" rg 2>/dev/null | while read p; do [ \"$(ps -p $p -o sid= 2>/dev/null | tr -d ' ')\" = \"$MY_SID\" ] && kill $p 2>/dev/null; done; true"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The hook matches `rg` processes by **session ID (SID)**: SID is inherited at fork
+and survives reparenting to init, so an orphaned `rg` still carries the Claude
+Code session's SID.
+
+> **Best-effort:** `rg` started from the *same terminal session* that launched
+> Claude Code shares the SID and would also be killed. In practice intentional
+> long-running `rg` in that terminal alongside an active session is rare, so the
+> trade-off is acceptable.
+
+---
+
+## Monitoring the traffic
+
+Every MCP call appends one JSONL record so the cross-fork traffic is observable.
+Both servers write the **same schema**:
+
+```json
+{"ts":"…+00:00","source":"codex","tool":"fork_to_codex","model":"codex-default","repo":"…",
+ "sandbox":"workspace-write","input_chars":4210,"prompt_tokens":null,"completion_tokens":null,
+ "total_tokens":null,"latency_s":122.5,"status":"rc=0"}
+```
+
+`source` is `codex` or `claude` (which fork ran), `status` is `rc=0` on success
+or `timeout` / `rc=N` on failure. The `prompt_tokens` / `completion_tokens` /
+`total_tokens` fields are **always `null`** — neither `codex exec` nor `claude -p`
+reports token counts — so the monitor format here is **redesigned from scratch
+around what the forks actually emit** (who called whom, on which repo, how long,
+success or not): `usage_report.py` **ignores those always-null token fields**
+rather than printing dead columns. (`model` is recorded — `codex-default` /
+`claude-default` unless `CODEX_MODEL` / `CLAUDE_FORK_MODEL` pins one — but the
+report does not group on it.)
+
+`usage_report.py` reads both logs (`usage_codex.log` + `usage_claude.log`) and has
+two views:
+
+**Aggregate (default)** — one row per group, the at-a-glance health table:
+
+```bash
+python3 usage_report.py                 # by source / tool (default)
+python3 usage_report.py --by repo       # which repos get forked into most
+python3 usage_report.py --by day        # per-day volume
+python3 usage_report.py --by source     # codex vs claude totals
+python3 usage_report.py --json          # machine-readable
+```
+
+All `--by` groupings: `source`, `tool`, `repo`, `day`, `source-tool` (default),
+`source-repo`, `day-source`.
+
+```
+source / tool             calls    ok   err    in_kc      lat_s    avg_s    max_s
+---------------------------------------------------------------------------------
+claude / fork_to_claude       1     1     0      3.1      142.0    142.0    142.0
+codex / ask_codex             1     1     0      0.9       33.2     33.2     33.2
+codex / fork_to_codex         1     1     0      4.2      122.5    122.5    122.5
+codex / web_rag               1     0     1      0.1      430.2    430.2    430.2
+---------------------------------------------------------------------------------
+TOTAL                         4     3     1      8.3      727.9    182.0    430.2
+```
+
+Columns: `calls` total, `ok`/`err` split (success = exit 0), `in_kc` input
+kilochars, and latency `sum / avg / max` in seconds — latency and error rate are
+what matter for cloud forks, since tokens are unavailable.
+
+**Stream / live monitor** — the most recent calls, one per line, errors flagged:
+
+```bash
+python3 usage_report.py --tail 20       # last 20 calls, newest last
+python3 usage_report.py --watch         # live, refresh every 3s (Ctrl-C stops)
+python3 usage_report.py --watch 10 --tail 30   # every 10s, 30 rows
+```
+
+```
+ts (utc)              src     tool             repo                sb       in_kc     lat_s  status
+------------------------------------------------------------------------------------------------
+2026-06-17 08:31:02   codex   fork_to_codex    app-backend         ww         4.2     122.5  rc=0
+2026-06-17 09:02:55   codex   web_rag          combo               ro         0.1     430.2  timeout  <-- ERR
+```
+
+`--watch` clears and re-renders on an interval for a live dashboard of forks as
+they land; `sb` is the abbreviated sandbox / permission_mode (`ww`=workspace-write,
+`ro`=read-only, `danger`=danger-full-access, `edit`=acceptEdits, `plan`).
+
+---
+
 ## Skill sharing across both harnesses
 
 Skills (reusable, on-demand procedures — RTL review, sim-debug runbooks, release
@@ -393,114 +504,3 @@ reliably from a fork: **pin `repo` to `combo`** (or the target repo), and **name
 the skill explicitly** in the `task`/`question` — e.g. "follow the steps in
 `combo/skills/combo-<name>/SKILL.md`". (Same statelessness as everywhere else in this
 directory: the fork sees only what the call string carries.)
-
----
-
-## Claude Code rg-cleanup `Stop` hook (insurance)
-
-With the fork model, neither agent runs search tooling at the multi-repo root, so
-the old root-level `rg .` fallback that orphaned `rg` processes should not fire.
-The `Stop` hook below is kept as **belt-and-suspenders only** — it costs nothing
-and still reaps any stray `rg` from other sources when a Claude Code session ends.
-
-Add to `~/.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "MY_SID=$(ps -p $$ -o sid= 2>/dev/null | tr -d ' '); pgrep -u \"$(id -un)\" rg 2>/dev/null | while read p; do [ \"$(ps -p $p -o sid= 2>/dev/null | tr -d ' ')\" = \"$MY_SID\" ] && kill $p 2>/dev/null; done; true"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-The hook matches `rg` processes by **session ID (SID)**: SID is inherited at fork
-and survives reparenting to init, so an orphaned `rg` still carries the Claude
-Code session's SID.
-
-> **Best-effort:** `rg` started from the *same terminal session* that launched
-> Claude Code shares the SID and would also be killed. In practice intentional
-> long-running `rg` in that terminal alongside an active session is rare, so the
-> trade-off is acceptable.
-
----
-
-## Monitoring the traffic
-
-Every MCP call appends one JSONL record so the cross-fork traffic is observable.
-Both servers write the **same schema**:
-
-```json
-{"ts":"…+00:00","source":"codex","tool":"fork_to_codex","model":"codex-default","repo":"…",
- "sandbox":"workspace-write","input_chars":4210,"prompt_tokens":null,"completion_tokens":null,
- "total_tokens":null,"latency_s":122.5,"status":"rc=0"}
-```
-
-`source` is `codex` or `claude` (which fork ran), `status` is `rc=0` on success
-or `timeout` / `rc=N` on failure. The `prompt_tokens` / `completion_tokens` /
-`total_tokens` fields are **always `null`** — neither `codex exec` nor `claude -p`
-reports token counts — so the monitor format here is **redesigned from scratch
-around what the forks actually emit** (who called whom, on which repo, how long,
-success or not): `usage_report.py` **ignores those always-null token fields**
-rather than printing dead columns. (`model` is recorded — `codex-default` /
-`claude-default` unless `CODEX_MODEL` / `CLAUDE_FORK_MODEL` pins one — but the
-report does not group on it.)
-
-`usage_report.py` reads both logs (`usage_codex.log` + `usage_claude.log`) and has
-two views:
-
-**Aggregate (default)** — one row per group, the at-a-glance health table:
-
-```bash
-python3 usage_report.py                 # by source / tool (default)
-python3 usage_report.py --by repo       # which repos get forked into most
-python3 usage_report.py --by day        # per-day volume
-python3 usage_report.py --by source     # codex vs claude totals
-python3 usage_report.py --json          # machine-readable
-```
-
-All `--by` groupings: `source`, `tool`, `repo`, `day`, `source-tool` (default),
-`source-repo`, `day-source`.
-
-```
-source / tool             calls    ok   err    in_kc      lat_s    avg_s    max_s
----------------------------------------------------------------------------------
-claude / fork_to_claude       1     1     0      3.1      142.0    142.0    142.0
-codex / ask_codex             1     1     0      0.9       33.2     33.2     33.2
-codex / fork_to_codex         1     1     0      4.2      122.5    122.5    122.5
-codex / web_rag               1     0     1      0.1      430.2    430.2    430.2
----------------------------------------------------------------------------------
-TOTAL                         4     3     1      8.3      727.9    182.0    430.2
-```
-
-Columns: `calls` total, `ok`/`err` split (success = exit 0), `in_kc` input
-kilochars, and latency `sum / avg / max` in seconds — latency and error rate are
-what matter for cloud forks, since tokens are unavailable.
-
-**Stream / live monitor** — the most recent calls, one per line, errors flagged:
-
-```bash
-python3 usage_report.py --tail 20       # last 20 calls, newest last
-python3 usage_report.py --watch         # live, refresh every 3s (Ctrl-C stops)
-python3 usage_report.py --watch 10 --tail 30   # every 10s, 30 rows
-```
-
-```
-ts (utc)              src     tool             repo                sb       in_kc     lat_s  status
-------------------------------------------------------------------------------------------------
-2026-06-17 08:31:02   codex   fork_to_codex    app-backend         ww         4.2     122.5  rc=0
-2026-06-17 09:02:55   codex   web_rag          combo               ro         0.1     430.2  timeout  <-- ERR
-```
-
-`--watch` clears and re-renders on an interval for a live dashboard of forks as
-they land; `sb` is the abbreviated sandbox / permission_mode (`ww`=workspace-write,
-`ro`=read-only, `danger`=danger-full-access, `edit`=acceptEdits, `plan`).
