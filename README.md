@@ -3,7 +3,10 @@
 `combo/` is the **cloud-only** coordination layer between the two cloud coding
 agents on this host — **Claude Code** (Anthropic) and **Codex** (OpenAI GPT-5.5).
 It lets either agent hand a whole, self-contained task to the other and pull the
-result back, so each can lean on the other where it is stronger.
+result back, so each can lean on the other where it is stronger. It also serves as
+the **single source of truth for skills shared by both harnesses** — reusable
+on-demand procedures kept once under `combo/skills/` and symlinked into each
+harness's search path (see [Skill sharing across both harnesses](#skill-sharing-across-both-harnesses)).
 
 It is extracted from `ollama/`, keeping **only** the cross-agent fork machinery.
 Everything Ollama-specific (local model launchers, `source_local`/`source_cloud`
@@ -11,7 +14,7 @@ static switching, the deprecated `localllm` bridge, VRAM/context tuning) is left
 behind in `ollama/` — local-LLM performance was not good enough to keep it on the
 critical path, so this directory assumes **both agents run in the cloud**.
 
-The whole design rests on four facts about this environment:
+The whole design rests on five facts about this environment:
 
 1. **Both agents must handle a multi-repo workspace.** The launch root (`<launch root>`)
    is **not one git repo** — it holds many independently-cloned repositories side
@@ -32,6 +35,11 @@ The whole design rests on four facts about this environment:
 4. **Every MCP call is logged and monitorable.** Both servers append one JSONL
    record per call so the cross-fork traffic can be watched live or summarized
    (see [Monitoring the traffic](#monitoring-the-traffic)).
+5. **Skills are shared from one source of truth.** Reusable procedures live once
+   under `combo/skills/` and are exposed to both harnesses by symlink, since
+   neither auto-detects an arbitrary directory; names are prefixed by origin layer
+   (`combo-` / `<repo>-` / `<harness>-`) to keep one flat namespace collision-free
+   (see [Skill sharing across both harnesses](#skill-sharing-across-both-harnesses)).
 
 ---
 
@@ -43,6 +51,8 @@ The whole design rests on four facts about this environment:
 | `mcp_codex.py`     | MCP server giving**Claude Code** a fork into cloud **Codex** (`fork_to_codex` / `ask_codex`) + `web_rag`, each pinned to one repo as its sandbox.    |
 | `mcp_claude.py`    | MCP server giving**Codex** (or another Claude Code) a fork into a one-shot headless **`claude -p`** (`fork_to_claude` / `ask_claude`) + `web_rag`. |
 | `usage_report.py`  | Monitor the cross-fork MCP traffic from the two JSONL logs — aggregate table or live stream (see[Monitoring the traffic](#monitoring-the-traffic)).                      |
+| `skills/`          | **Shared skills** source of truth — one dir per skill (`combo-<name>/SKILL.md`), symlinked into both harnesses (see[Skill sharing across both harnesses](#skill-sharing-across-both-harnesses)).      |
+| `skills/link.sh`   | Idempotent bootstrap that symlinks `combo/skills` into each harness's search path (`.claude/skills`, `.agents/skills`).                                              |
 | `usage_codex.log`  | JSONL usage records written by `mcp_codex.py` (gitignored).                                                                                                          |
 | `usage_claude.log` | JSONL usage records written by `mcp_claude.py` (gitignored).                                                                                                         |
 
@@ -262,7 +272,7 @@ Keep the skill **body** under version control in `combo/skills/`, and link it in
 both harnesses' **project-scope** search paths at the launch root:
 
 ```plain
-<launch root>/combo/skills/<name>/        # the real skill (git-tracked, shared)
+<launch root>/combo/skills/combo-<name>/  # the real skill (git-tracked, shared; combo- prefix)
   SKILL.md
   references/   scripts/   …
 
@@ -317,12 +327,12 @@ ln -sfn <launch root>/combo/skills <launch root>/.agents/skills
 
 ### Where each procedure belongs
 
-| Layer                                                   | What goes there                                                                          |
-| ------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `<launch root>/combo/skills/<name>`                   | **Shared** skill body — Markdown steps, `references/`, `scripts/`             |
-| `<launch root>/.claude/skills`, `…/.agents/skills` | Each is a single symlink → `combo/skills` — the shared-skill entry point for each harness |
-| `<repo>/.agents/skills` (+ `<repo>/.claude/skills`) | **Repo-specific** skills — that repo's design rules, tests, review focus          |
-| `<harness>/.agents/skills`                            | **Harness-specific** skills — simulation/lint/debug steps that assume one harness |
+| Layer                                                   | What goes there                                                                                  |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `<launch root>/combo/skills/combo-<name>`             | **Shared** skill body (`combo-` prefix) — Markdown steps, `references/`, `scripts/` |
+| `<launch root>/.claude/skills`, `…/.agents/skills` | Each is a single symlink →`combo/skills` — the shared-skill entry point for each harness     |
+| `<repo>/.agents/skills` (+ `<repo>/.claude/skills`) | **Repo-specific** skills — that repo's design rules, tests, review focus                  |
+| `<harness>/.agents/skills`                            | **Harness-specific** skills — simulation/lint/debug steps that assume one harness         |
 
 And the rule-vs-skill split:
 
@@ -344,7 +354,7 @@ relevant) rather than what it does — that text drives auto-selection:
 
 ```markdown
 ---
-name: rtl-review
+name: combo-rtl-review
 description: Use when reviewing RTL changes for reset, clocking, interface timing, CDC risks, and missing tests.
 ---
 
@@ -356,8 +366,24 @@ description: Use when reviewing RTL changes for reset, clocking, interface timin
 5. Report findings first, with file:line references.
 ```
 
-Name shared skills plainly (`rtl-review`, `release-notes`, `notion-research`);
-give harness-specific ones a concrete name so they never collide.
+#### Name by origin layer (prefix convention)
+
+`combo/skills` is symlinked into **every** repo, so its names share one flat
+namespace with each repo's own `.claude/skills` / `.agents/skills`. To keep them
+from colliding and to make a skill's **origin** obvious in any listing, prefix the
+name by the layer it lives in — and use the **same string for the directory name
+and the frontmatter `name:`** (both harnesses select on `name` + `description`, so
+the two must match):
+
+| Layer                                                         | Prefix         | Example              |
+| ------------------------------------------------------------- | -------------- | -------------------- |
+| `combo/skills` — **shared**                          | `combo-`     | `combo-rtl-review` |
+| `<repo>/.claude(.agents)/skills` — **repo-specific** | `<repo>-`    | `cpu-sim-debug`    |
+| `<harness>/.agents/skills` — **harness-specific**    | `<harness>-` | `claude-lint`      |
+
+The prefix is for **human/listing disambiguation and collision avoidance**, not
+for triggering — auto-selection is still driven by `description`, so keep that
+focused on *when to use* the skill.
 
 ### Skills through a Codex fork
 
@@ -365,7 +391,7 @@ A `fork_to_codex` / `ask_codex` call is **one-shot and stateless**, so a skill
 sitting in `.agents/skills` may **not** auto-fire inside the fork. To use one
 reliably from a fork: **pin `repo` to `combo`** (or the target repo), and **name
 the skill explicitly** in the `task`/`question` — e.g. "follow the steps in
-`combo/skills/<name>/SKILL.md`". (Same statelessness as everywhere else in this
+`combo/skills/combo-<name>/SKILL.md`". (Same statelessness as everywhere else in this
 directory: the fork sees only what the call string carries.)
 
 ---
