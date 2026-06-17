@@ -266,9 +266,15 @@ both harnesses' **project-scope** search paths at the launch root:
   SKILL.md
   references/   scripts/   …
 
-<launch root>/.claude/skills/<name>   ->  symlink to the body  (Claude Code finds it)
-<launch root>/.agents/skills/<name>   ->  symlink to the body  (Codex finds it)
+<launch root>/.claude/skills   ->  symlink to <launch root>/combo/skills  (Claude Code finds every skill)
+<launch root>/.agents/skills   ->  symlink to <launch root>/combo/skills  (Codex finds every skill)
 ```
+
+The link is at the **`skills` directory** level (one symlink per harness, 2 per
+launch root), not per individual skill. Both harnesses follow a symlinked
+`skills` folder, so every directory under `combo/skills/` is visible at once —
+**adding a skill needs no relinking**: drop the dir into `combo/skills/` and both
+sides see it immediately.
 
 Why link into `<launch root>` project scope rather than `~/.claude` / `~/.agents`
 user-global:
@@ -293,29 +299,28 @@ user-global:
 
 ### Relinking script (idempotent)
 
-Symlinks are machine-local and do not travel in git, so commit a re-link script —
-`combo/skills/link.sh` — and run it once per new environment or whenever a skill
-is added:
+Symlinks are machine-local and do not travel in git. Because the link is at the
+`skills` directory level, it is just **2 links per launch root** — re-created only
+when a new environment is set up (a freshly cloned launch root with no links yet),
+**not** when a skill is added. That makes manual setup fine, but a tiny
+bootstrap script — `combo/skills/link.sh` — keeps it idempotent:
 
 ```bash
 #!/bin/bash
-# combo/skills/link.sh — expose every combo skill to both harnesses at the launch root
-mkdir -p <launch root>/.claude/skills <launch root>/.agents/skills
-for d in <launch root>/combo/skills/*/; do
-  name=$(basename "$d")
-  ln -sfn "$d" <launch root>/.claude/skills/"$name"
-  ln -sfn "$d" <launch root>/.agents/skills/"$name"
-done
+# combo/skills/link.sh — expose the whole combo/skills dir to both harnesses
+ln -sfn <launch root>/combo/skills <launch root>/.claude/skills
+ln -sfn <launch root>/combo/skills <launch root>/.agents/skills
 ```
 
-`ln -sfn` makes it idempotent — adding a skill is just "drop the dir, rerun this".
+`ln -sfn` makes it idempotent. Adding a skill is just "drop the dir under
+`combo/skills/`" — no relink needed, since the `skills` dir itself is the link.
 
 ### Where each procedure belongs
 
 | Layer                                                   | What goes there                                                                          |
 | ------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `<launch root>/combo/skills/<name>`                   | **Shared** skill body — Markdown steps, `references/`, `scripts/`             |
-| `<launch root>/.claude/skills`, `…/.agents/skills` | Symlinks only — the shared-skill entry points for each harness                          |
+| `<launch root>/.claude/skills`, `…/.agents/skills` | Each is a single symlink → `combo/skills` — the shared-skill entry point for each harness |
 | `<repo>/.agents/skills` (+ `<repo>/.claude/skills`) | **Repo-specific** skills — that repo's design rules, tests, review focus          |
 | `<harness>/.agents/skills`                            | **Harness-specific** skills — simulation/lint/debug steps that assume one harness |
 
