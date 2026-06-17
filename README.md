@@ -13,7 +13,7 @@ critical path, so this directory assumes **both agents run in the cloud**.
 
 The whole design rests on four facts about this environment:
 
-1. **Both agents must handle a multi-repo workspace.** The launch root (`~/rep`)
+1. **Both agents must handle a multi-repo workspace.** The launch root (`<launch root>`)
    is **not one git repo** — it holds many independently-cloned repositories side
    by side (mirrored in the global `CLAUDE.md` / `AGENTS.md`). Neither agent can
    run git/search tooling at the root. Every fork is therefore **pinned to one
@@ -40,9 +40,9 @@ The whole design rests on four facts about this environment:
 | File                 | Role                                                                                                                                                                   |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `up_version.csh`   | Reinstall Claude Code + Codex CLIs to latest (`npm i -g @anthropic-ai/claude-code@latest @openai/codex@latest`).                                                     |
-| `mcp_codex.py`     | MCP server giving **Claude Code** a fork into cloud **Codex** (`fork_to_codex` / `ask_codex`) + `web_rag`, each pinned to one repo as its sandbox.    |
-| `mcp_claude.py`    | MCP server giving **Codex** (or another Claude Code) a fork into a one-shot headless **`claude -p`** (`fork_to_claude` / `ask_claude`) + `web_rag`. |
-| `usage_report.py`  | Monitor the cross-fork MCP traffic from the two JSONL logs — aggregate table or live stream (see [Monitoring the traffic](#monitoring-the-traffic)).                      |
+| `mcp_codex.py`     | MCP server giving**Claude Code** a fork into cloud **Codex** (`fork_to_codex` / `ask_codex`) + `web_rag`, each pinned to one repo as its sandbox.    |
+| `mcp_claude.py`    | MCP server giving**Codex** (or another Claude Code) a fork into a one-shot headless **`claude -p`** (`fork_to_claude` / `ask_claude`) + `web_rag`. |
+| `usage_report.py`  | Monitor the cross-fork MCP traffic from the two JSONL logs — aggregate table or live stream (see[Monitoring the traffic](#monitoring-the-traffic)).                      |
 | `usage_codex.log`  | JSONL usage records written by `mcp_codex.py` (gitignored).                                                                                                          |
 | `usage_claude.log` | JSONL usage records written by `mcp_claude.py` (gitignored).                                                                                                         |
 
@@ -78,13 +78,13 @@ entire world.**
   `--permission-mode`.
 
 `repo` is resolved relative to the fork base (`CODEX_FORK_BASE` / `CLAUDE_FORK_BASE`,
-default `~/rep`) or accepts an absolute path. As long as the call points at a real
+default `<launch root>`) or accepts an absolute path. As long as the call points at a real
 project — pass `repo`, or set `CODEX_FORK_DEFAULT_REPO` / `CLAUDE_FORK_DEFAULT_REPO`
 — the forked agent never sees the root and the "operate at the second level or
 deeper / git fails at the root" problem cannot arise.
 
 > **Caveat:** an empty `repo` with **no** default configured resolves to the fork
-> base (`~/rep`) — i.e. the multi-repo launch root itself. The servers do not
+> base (`<launch root>`) — i.e. the multi-repo launch root itself. The servers do not
 > reject that, so always pass a `repo` or configure a default repo; otherwise the
 > very layout this section avoids leaks back in.
 
@@ -181,7 +181,7 @@ codex mcp add claude -- python3 $REP/combo/mcp_claude.py
 - Codex → registers **`claude`** (`mcp_claude.py`). It does **not** register
   `codex` for the same reason.
 
-(`$REP` is the launch root, e.g. `~/rep`. Verify with `/mcp` in Claude Code or
+(`$REP` is the launch root, e.g. `<launch root>`. Verify with `/mcp` in Claude Code or
 `codex mcp list`.)
 
 ### Tools exposed by each server
@@ -196,11 +196,11 @@ codex mcp add claude -- python3 $REP/combo/mcp_claude.py
 
 **`mcp_claude.py`** (Codex → headless `claude -p`):
 
-| Tool                                            | Permission mode (default) | Use for                                                  |
-| ----------------------------------------------- | ------------------------- | -------------------------------------------------------- |
+| Tool                                            | Permission mode (default) | Use for                                                         |
+| ----------------------------------------------- | ------------------------- | --------------------------------------------------------------- |
 | `fork_to_claude(task, repo, permission_mode)` | `acceptEdits`           | Hand a bounded coding task to `claude -p`; it edits the repo. |
-| `ask_claude(question, repo)`                  | `plan`                  | Read-only question / review of a repo. No edits.         |
-| `web_rag(query, repo)`                        | `plan`                  | Web grounding via Claude Code's built-in WebSearch/WebFetch. |
+| `ask_claude(question, repo)`                  | `plan`                  | Read-only question / review of a repo. No edits.                |
+| `web_rag(query, repo)`                        | `plan`                  | Web grounding via Claude Code's built-in WebSearch/WebFetch.    |
 
 > The `sandbox` / `permission_mode` column shows each tool's **default**;
 > `fork_to_codex` and `fork_to_claude` pass a caller-supplied value straight
@@ -223,11 +223,145 @@ Both servers share the same shape of knobs (`CODEX_*` / `CLAUDE_*`):
 | Codex var (`mcp_codex.py`) | Claude var (`mcp_claude.py`) | Default                     | Meaning                              |
 | ---------------------------- | ------------------------------ | --------------------------- | ------------------------------------ |
 | `CODEX_BIN`                | `CLAUDE_BIN`                 | CLI on PATH → nvm fallback | Agent CLI binary                     |
-| `CODEX_FORK_BASE`          | `CLAUDE_FORK_BASE`           | `~/rep`                   | Base a relative `repo` resolves to |
+| `CODEX_FORK_BASE`          | `CLAUDE_FORK_BASE`           | `<launch root>`           | Base a relative `repo` resolves to |
 | `CODEX_FORK_DEFAULT_REPO`  | `CLAUDE_FORK_DEFAULT_REPO`   | (empty)                     | Repo used when a call omits `repo` |
 | `CODEX_MODEL`              | `CLAUDE_FORK_MODEL`          | (empty → CLI default)      | Pin the fork model                   |
 | `CODEX_FORK_TIMEOUT`       | `CLAUDE_FORK_TIMEOUT`        | `1800`                    | Per-fork wall-clock cap (seconds)    |
 | `CODEX_FORK_USAGE_LOG`     | `CLAUDE_FORK_USAGE_LOG`      | `combo/usage_*.log`       | JSONL usage log path                 |
+
+---
+
+## Skill sharing across both harnesses
+
+Skills (reusable, on-demand procedures — RTL review, sim-debug runbooks, release
+notes, Notion research) can be **shared** by both agents from a single source of
+truth in `combo/`, while harness- or repo-specific procedures stay local. The
+whole scheme rests on one fact about how each harness discovers skills:
+
+|                            | Claude Code                                                   | Codex (GPT-5.5)                                                                                              |
+| -------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Format                     | `SKILL.md` (`name` / `description` / `allowed-tools`) | `SKILL.md` (`name` / `description`, optional `metadata.short-description`)                           |
+| User-global path           | `~/.claude/skills/`                                         | `~/.agents/skills/` (`~/.codex/skills/` still read but **deprecated**)                             |
+| Repo / project path        | `<repo>/.claude/skills/`                                    | `<repo>/.agents/skills/` — every dir from CWD up to the repo root; also `<trusted-repo>/.codex/skills/` |
+| Admin / system path        | —                                                            | `/etc/codex/skills/` (machine-wide); bundled OpenAI skills under `~/.codex/skills/.system/`              |
+| Arbitrary-path auto-detect | ❌ no                                                         | ❌ no                                                                                                        |
+| `combo/skills` direct    | ❌ not discovered                                             | ❌ not discovered                                                                                            |
+
+`name` + `description` are the **portable minimum** both harnesses read; the rest
+is harness-local and simply ignored by the other side (`allowed-tools` is
+Claude-only; `metadata.short-description` is a Codex extra), so including them is
+safe. The real split is the **search path** — `.claude/skills` vs `.agents/skills`
+— and neither harness auto-detects an arbitrary directory, so a skill sitting in
+`combo/skills` is *not* found on its own; it must be exposed through each
+harness's search path via **symlink**. (Codex follows symlinked skill folders in
+these locations, so linking works.)
+
+### Layout — single source of truth + symlinks
+
+Keep the skill **body** under version control in `combo/skills/`, and link it into
+both harnesses' **project-scope** search paths at the launch root:
+
+```plain
+<launch root>/combo/skills/<name>/        # the real skill (git-tracked, shared)
+  SKILL.md
+  references/   scripts/   …
+
+<launch root>/.claude/skills/<name>   ->  symlink to the body  (Claude Code finds it)
+<launch root>/.agents/skills/<name>   ->  symlink to the body  (Codex finds it)
+```
+
+Why link into `<launch root>` project scope rather than `~/.claude` / `~/.agents`
+user-global:
+
+- The body lives **once** in `combo/` (git-tracked) — no duplication, shareable
+  with the team.
+- Linking at the **launch-root project scope** (not user-global) keeps the
+  machine's personal config clean and scopes the skills to **this workspace**.
+- An **interactive** session started at the launch root discovers the links
+  naturally (Codex walks `.agents/skills` from CWD up; Claude reads the
+  project-scope `.claude/skills`). **Forks are different**: a fork is pinned to
+  one repo (`codex exec -C <repo>` / `claude -p` `cwd`), so its skill walk is
+  rooted at *that* repo, not the launch root — launch-root links are **not**
+  guaranteed to be in scope. For forks, either link the skill under the forked
+  repo's own path / user-global `~/.agents/skills`, or name it explicitly in the
+  task string (see [Skills through a Codex fork](#skills-through-a-codex-fork)).
+
+> **`<launch root>` is not a git repo** — it is the multi-repo aggregation root.
+> So `<launch root>/.claude/skills` is *not* a git-shared `<repo>/.claude/skills`;
+> it is a **local workspace project scope**. Anything you want versioned/shared
+> goes in the body under `combo/skills`, which *is* tracked.
+
+### Relinking script (idempotent)
+
+Symlinks are machine-local and do not travel in git, so commit a re-link script —
+`combo/skills/link.sh` — and run it once per new environment or whenever a skill
+is added:
+
+```bash
+#!/bin/bash
+# combo/skills/link.sh — expose every combo skill to both harnesses at the launch root
+mkdir -p <launch root>/.claude/skills <launch root>/.agents/skills
+for d in <launch root>/combo/skills/*/; do
+  name=$(basename "$d")
+  ln -sfn "$d" <launch root>/.claude/skills/"$name"
+  ln -sfn "$d" <launch root>/.agents/skills/"$name"
+done
+```
+
+`ln -sfn` makes it idempotent — adding a skill is just "drop the dir, rerun this".
+
+### Where each procedure belongs
+
+| Layer                                                   | What goes there                                                                          |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `<launch root>/combo/skills/<name>`                   | **Shared** skill body — Markdown steps, `references/`, `scripts/`             |
+| `<launch root>/.claude/skills`, `…/.agents/skills` | Symlinks only — the shared-skill entry points for each harness                          |
+| `<repo>/.agents/skills` (+ `<repo>/.claude/skills`) | **Repo-specific** skills — that repo's design rules, tests, review focus          |
+| `<harness>/.agents/skills`                            | **Harness-specific** skills — simulation/lint/debug steps that assume one harness |
+
+And the rule-vs-skill split:
+
+- **Always-on rules** (don't git at the root; descend to a repo for git/diff/test;
+  pin a repo on every fork; Notion access path) → `CLAUDE.md` / `AGENTS.md`.
+- **On-demand reusable procedures** → skills (the layout above).
+- **External-system connections** (Notion / GitHub / Slack) → MCP.
+- **Bundled distribution** (skill + MCP + assets together) → a plugin.
+
+> A shared skill is visible to **every** repo. Anything that depends hard on a
+> specific project's paths, EDA tools, env vars, or harness layout belongs in a
+> **repo- or harness-specific** skill, not in `combo/skills`.
+
+### `SKILL.md` and naming
+
+Keep frontmatter **minimal** so it works in both harnesses, and make the
+`description` say **when to use** the skill (trigger phrasing, in both JP/EN where
+relevant) rather than what it does — that text drives auto-selection:
+
+```markdown
+---
+name: rtl-review
+description: Use when reviewing RTL changes for reset, clocking, interface timing, CDC risks, and missing tests.
+---
+
+# RTL Review
+1. Check the changed RTL files first.
+2. Review reset behavior and clock assumptions.
+3. Check interface timing and CDC risks.
+4. Identify missing or stale tests.
+5. Report findings first, with file:line references.
+```
+
+Name shared skills plainly (`rtl-review`, `release-notes`, `notion-research`);
+give harness-specific ones a concrete name so they never collide.
+
+### Skills through a Codex fork
+
+A `fork_to_codex` / `ask_codex` call is **one-shot and stateless**, so a skill
+sitting in `.agents/skills` may **not** auto-fire inside the fork. To use one
+reliably from a fork: **pin `repo` to `combo`** (or the target repo), and **name
+the skill explicitly** in the `task`/`question` — e.g. "follow the steps in
+`combo/skills/<name>/SKILL.md`". (Same statelessness as everywhere else in this
+directory: the fork sees only what the call string carries.)
 
 ---
 
@@ -332,7 +466,7 @@ python3 usage_report.py --watch 10 --tail 30   # every 10s, 30 rows
 ```
 ts (utc)              src     tool             repo                sb       in_kc     lat_s  status
 ------------------------------------------------------------------------------------------------
-2026-06-17 08:31:02   codex   fork_to_codex    eai_design          ww         4.2     122.5  rc=0
+2026-06-17 08:31:02   codex   fork_to_codex    app-backend         ww         4.2     122.5  rc=0
 2026-06-17 09:02:55   codex   web_rag          combo               ro         0.1     430.2  timeout  <-- ERR
 ```
 
