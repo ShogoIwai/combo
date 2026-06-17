@@ -1,0 +1,341 @@
+# Combo — Claude Code ⇄ Codex cross-fork coordination
+
+`combo/` is the **cloud-only** coordination layer between the two cloud coding
+agents on this host — **Claude Code** (Anthropic) and **Codex** (OpenAI GPT-5.5).
+It lets either agent hand a whole, self-contained task to the other and pull the
+result back, so each can lean on the other where it is stronger.
+
+It is extracted from `ollama/`, keeping **only** the cross-agent fork machinery.
+Everything Ollama-specific (local model launchers, `source_local`/`source_cloud`
+static switching, the deprecated `localllm` bridge, VRAM/context tuning) is left
+behind in `ollama/` — local-LLM performance was not good enough to keep it on the
+critical path, so this directory assumes **both agents run in the cloud**.
+
+The whole design rests on four facts about this environment:
+
+1. **Both agents must handle a multi-repo workspace.** The launch root (`~/rep`)
+   is **not one git repo** — it holds many independently-cloned repositories side
+   by side (mirrored in the global `CLAUDE.md` / `AGENTS.md`). Neither agent can
+   run git/search tooling at the root. Every fork is therefore **pinned to one
+   repo** (`codex exec -C <repo>` / `claude -p` `cwd`+`--add-dir`), so the forked
+   agent sees one real working tree instead of the root — **provided the call
+   passes a real `repo` (or a default repo is configured)**; an empty `repo` with
+   no default falls back to the launch root itself, so always pin one.
+2. **Cross-session context is carried in Notion, not in the fork.** Each fork is
+   one-shot and stateless — it cannot see the caller's conversation. Durable,
+   cross-session working context is pooled in **Notion** and pulled back in as
+   needed (see [Context carry-over via Notion](#context-carry-over-via-notion)).
+3. **Each side registers only the MCP that reaches the *other* agent.** An agent
+   never registers an MCP that forks back into itself — that would be a useless
+   self-loop. Claude Code registers the **`codex`** server; Codex registers the
+   **`claude`** server (see [Who registers what](#who-registers-what)).
+4. **Every MCP call is logged and monitorable.** Both servers append one JSONL
+   record per call so the cross-fork traffic can be watched live or summarized
+   (see [Monitoring the traffic](#monitoring-the-traffic)).
+
+---
+
+## Directory contents
+
+| File                 | Role                                                                                                                                                                   |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `up_version.csh`   | Reinstall Claude Code + Codex CLIs to latest (`npm i -g @anthropic-ai/claude-code@latest @openai/codex@latest`).                                                     |
+| `mcp_codex.py`     | MCP server giving **Claude Code** a fork into cloud **Codex** (`fork_to_codex` / `ask_codex`) + `web_rag`, each pinned to one repo as its sandbox.    |
+| `mcp_claude.py`    | MCP server giving **Codex** (or another Claude Code) a fork into a one-shot headless **`claude -p`** (`fork_to_claude` / `ask_claude`) + `web_rag`. |
+| `usage_report.py`  | Monitor the cross-fork MCP traffic from the two JSONL logs — aggregate table or live stream (see [Monitoring the traffic](#monitoring-the-traffic)).                      |
+| `usage_codex.log`  | JSONL usage records written by `mcp_codex.py` (gitignored).                                                                                                          |
+| `usage_claude.log` | JSONL usage records written by `mcp_claude.py` (gitignored).                                                                                                         |
+
+### Dependency
+
+Both servers use FastMCP, so the `mcp` package must be importable by the **same
+`python3`** the client launches; the fork calls themselves use only the standard
+library (they shell out to the `codex` / `claude` CLIs).
+
+```bash
+python3 -m pip install --user mcp        # once, for the python3 on PATH
+python3 -c 'import mcp'                   # verify (no output = OK)
+```
+
+> If the client runs a different interpreter, registration connects but tool
+> calls fail with `ModuleNotFoundError: No module named 'mcp'`. Install `mcp` for
+> that interpreter, or register with its absolute `python3` path.
+
+---
+
+## Multi-repo handling: each fork is pinned to one repo
+
+The workspace is a launch root holding many side-by-side clones, not a single git
+repo, so an agent running at the root has no valid git scope (and the old "`rg .`
+fallback at the root" is the historical cause of orphaned `rg` processes). The
+fork model removes that at the source: **every fork names exactly one repo as its
+entire world.**
+
+- **`mcp_codex.py`** runs `codex exec -C <repo> -s <sandbox> --skip-git-repo-check`
+  — `-C <repo>` makes that one repository Codex's working root; *that repo is the
+  sandbox* (the `web_rag` tool additionally passes `-c tools.web_search=true`).
+- **`mcp_claude.py`** runs `claude -p` with that repo as `cwd` + `--add-dir` and a
+  `--permission-mode`.
+
+`repo` is resolved relative to the fork base (`CODEX_FORK_BASE` / `CLAUDE_FORK_BASE`,
+default `~/rep`) or accepts an absolute path. As long as the call points at a real
+project — pass `repo`, or set `CODEX_FORK_DEFAULT_REPO` / `CLAUDE_FORK_DEFAULT_REPO`
+— the forked agent never sees the root and the "operate at the second level or
+deeper / git fails at the root" problem cannot arise.
+
+> **Caveat:** an empty `repo` with **no** default configured resolves to the fork
+> base (`~/rep`) — i.e. the multi-repo launch root itself. The servers do not
+> reject that, so always pass a `repo` or configure a default repo; otherwise the
+> very layout this section avoids leaks back in.
+
+Each call is **one-shot and stateless** — put everything the forked agent needs
+into `task`/`question`; it cannot read the caller's conversation. That same
+statelessness is also why Codex's cloud/local resume-list split is irrelevant
+here: a fork carries no session, so there is nothing to merge.
+
+---
+
+## Context carry-over via Notion
+
+A fork cannot see the caller's conversation, and the two agents keep entirely
+separate session histories. So **durable, cross-session context lives in Notion**,
+not in any single agent's transcript: write the shared state (decisions, current
+status, facts the other side will need) to a Notion page, and have either agent
+pull it back in at the start of a task. A fork that needs prior context is handed
+the **Notion page ID/URL** in its `task` string and reads it through whichever
+Notion access path that agent has.
+
+The two agents reach Notion **differently**, and this asymmetry is the key setup
+detail:
+
+| Agent       | Notion access                                  | Setup needed                                                      |
+| ----------- | ---------------------------------------------- | ----------------------------------------------------------------- |
+| Claude Code | **Browser connector** (claude.ai)        | **None here** — already linked via the account's connector |
+| Codex       | **Dedicated Notion MCP** in `~/.codex` | **Required** — register + OAuth (below)                    |
+
+### Claude Code — no setup
+
+The **interactive** Claude Code session (the caller that drives this coordination)
+reaches Notion through the **browser connector** configured in the claude.ai
+account, so there is **nothing to register in this directory** for the Claude side
+— do not add a Notion MCP to Claude Code.
+
+> **Scope of "no setup".** This covers the interactive Claude Code session only.
+> The headless `claude -p` fork that `mcp_claude.py` spawns is a separate process
+> (started with just `--add-dir` / `--permission-mode` / `--output-format text`);
+> whether it inherits the account's Notion connector is environment-dependent and
+> not established by this repo's code. So treat Notion as the **interactive
+> caller's** job — do Notion reads/writes from the driving session (or via
+> `ask_codex`), not from inside a `fork_to_claude` task.
+
+### Codex — dedicated Notion MCP (required)
+
+Codex has no such connector, so it needs the Notion MCP registered in its own
+config. Register it once (adds `[mcp_servers.notion]` to `~/.codex/config.toml`),
+then complete OAuth in the browser:
+
+```bash
+codex mcp add notion --url https://mcp.notion.com/mcp
+codex mcp login notion        # OAuth in the browser; grants page access
+```
+
+> **Must auto-approve, OAuth connector only.** A fork runs `codex exec`
+> **non-interactively** (`stdin` closed), so any MCP call that needs per-call
+> approval is auto-**cancelled** (`user cancelled MCP tool call`). Set the OAuth
+> `notion` connector to auto-approve in `~/.codex/config.toml`:
+>
+> ```toml
+> [mcp_servers.notion]
+> url = "https://mcp.notion.com/mcp"
+> default_tools_approval_mode = "approve"   # values: auto | prompt | approve
+> ```
+>
+> Without it, a Notion write through `ask_codex` returns `user cancelled MCP tool call`. Do **not** rely on the Bearer-token `codex_apps` managed connector — it
+> lacks page access (`UNAUTHORIZED`); phrase the task to use the OAuth `notion`
+> connector explicitly. Verified end-to-end (append + delete on a target page).
+
+Once registered, Notion reads/writes are reachable by handing a Notion task to
+`ask_codex` (e.g. "append section Z to page `<id>` with …"). Put the full intent
+— target page (by **ID** is most reliable), title, exact content — in the
+question.
+
+---
+
+## Who registers what
+
+The rule: **register only the MCP that forks into the *other* agent; never
+register your own.** A server that forks back into the same agent is a self-loop
+with no purpose.
+
+```bash
+# In Claude Code: register ONLY the codex fork (reaches the other agent).
+claude mcp add -s user codex python3 $REP/combo/mcp_codex.py
+
+# In Codex: register ONLY the claude fork (reaches the other agent).
+codex mcp add claude -- python3 $REP/combo/mcp_claude.py
+```
+
+- Claude Code → registers **`codex`** (`mcp_codex.py`). It does **not** register
+  `claude` — forking Claude Code back into `claude -p` from Claude Code is a
+  self-loop.
+- Codex → registers **`claude`** (`mcp_claude.py`). It does **not** register
+  `codex` for the same reason.
+
+(`$REP` is the launch root, e.g. `~/rep`. Verify with `/mcp` in Claude Code or
+`codex mcp list`.)
+
+### Tools exposed by each server
+
+**`mcp_codex.py`** (Claude Code → cloud Codex):
+
+| Tool                                   | Sandbox (default)   | Use for                                                                   |
+| -------------------------------------- | ------------------- | ------------------------------------------------------------------------- |
+| `fork_to_codex(task, repo, sandbox)` | `workspace-write` | Hand a bounded coding task to Codex; it edits the one repo.               |
+| `ask_codex(question, repo)`          | `read-only`       | Repo question / review; also the Notion path (above).                     |
+| `web_rag(query, repo)`               | `read-only`       | Live web search (`codex exec -c tools.web_search=true`), cited sources. |
+
+**`mcp_claude.py`** (Codex → headless `claude -p`):
+
+| Tool                                            | Permission mode (default) | Use for                                                  |
+| ----------------------------------------------- | ------------------------- | -------------------------------------------------------- |
+| `fork_to_claude(task, repo, permission_mode)` | `acceptEdits`           | Hand a bounded coding task to `claude -p`; it edits the repo. |
+| `ask_claude(question, repo)`                  | `plan`                  | Read-only question / review of a repo. No edits.         |
+| `web_rag(query, repo)`                        | `plan`                  | Web grounding via Claude Code's built-in WebSearch/WebFetch. |
+
+> The `sandbox` / `permission_mode` column shows each tool's **default**;
+> `fork_to_codex` and `fork_to_claude` pass a caller-supplied value straight
+> through to the CLI without validation (`fork_to_codex` accepts `read-only`,
+> `workspace-write`, `danger-full-access`). "read-only" / `plan` is read-only with
+> respect to the **repo/filesystem only** — an external MCP tool such as an
+> auto-approved Notion connector can still write (that is exactly how the Notion
+> path through `ask_codex` works).
+
+Each fork runs on the **cloud** model: `mcp_codex.py` reuses the Codex login
+(`~/.codex`, GPT-5.5 by default) and `mcp_claude.py` inherits the parent Claude
+Code auth as-is. `web_rag` is the external-access path — query it whenever an
+answer depends on facts outside the model's knowledge (anything post-cutoff, any
+"latest"/version/pricing claim) rather than guessing.
+
+### Environment overrides
+
+Both servers share the same shape of knobs (`CODEX_*` / `CLAUDE_*`):
+
+| Codex var (`mcp_codex.py`) | Claude var (`mcp_claude.py`) | Default                     | Meaning                              |
+| ---------------------------- | ------------------------------ | --------------------------- | ------------------------------------ |
+| `CODEX_BIN`                | `CLAUDE_BIN`                 | CLI on PATH → nvm fallback | Agent CLI binary                     |
+| `CODEX_FORK_BASE`          | `CLAUDE_FORK_BASE`           | `~/rep`                   | Base a relative `repo` resolves to |
+| `CODEX_FORK_DEFAULT_REPO`  | `CLAUDE_FORK_DEFAULT_REPO`   | (empty)                     | Repo used when a call omits `repo` |
+| `CODEX_MODEL`              | `CLAUDE_FORK_MODEL`          | (empty → CLI default)      | Pin the fork model                   |
+| `CODEX_FORK_TIMEOUT`       | `CLAUDE_FORK_TIMEOUT`        | `1800`                    | Per-fork wall-clock cap (seconds)    |
+| `CODEX_FORK_USAGE_LOG`     | `CLAUDE_FORK_USAGE_LOG`      | `combo/usage_*.log`       | JSONL usage log path                 |
+
+---
+
+## Claude Code rg-cleanup `Stop` hook (insurance)
+
+With the fork model, neither agent runs search tooling at the multi-repo root, so
+the old root-level `rg .` fallback that orphaned `rg` processes should not fire.
+The `Stop` hook below is kept as **belt-and-suspenders only** — it costs nothing
+and still reaps any stray `rg` from other sources when a Claude Code session ends.
+
+Add to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "MY_SID=$(ps -p $$ -o sid= 2>/dev/null | tr -d ' '); pgrep -u \"$(id -un)\" rg 2>/dev/null | while read p; do [ \"$(ps -p $p -o sid= 2>/dev/null | tr -d ' ')\" = \"$MY_SID\" ] && kill $p 2>/dev/null; done; true"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The hook matches `rg` processes by **session ID (SID)**: SID is inherited at fork
+and survives reparenting to init, so an orphaned `rg` still carries the Claude
+Code session's SID.
+
+> **Best-effort:** `rg` started from the *same terminal session* that launched
+> Claude Code shares the SID and would also be killed. In practice intentional
+> long-running `rg` in that terminal alongside an active session is rare, so the
+> trade-off is acceptable.
+
+---
+
+## Monitoring the traffic
+
+Every MCP call appends one JSONL record so the cross-fork traffic is observable.
+Both servers write the **same schema**:
+
+```json
+{"ts":"…+00:00","source":"codex","tool":"fork_to_codex","model":"codex-default","repo":"…",
+ "sandbox":"workspace-write","input_chars":4210,"prompt_tokens":null,"completion_tokens":null,
+ "total_tokens":null,"latency_s":122.5,"status":"rc=0"}
+```
+
+`source` is `codex` or `claude` (which fork ran), `status` is `rc=0` on success
+or `timeout` / `rc=N` on failure. The `prompt_tokens` / `completion_tokens` /
+`total_tokens` fields are **always `null`** — neither `codex exec` nor `claude -p`
+reports token counts — so the monitor format here is **redesigned from scratch
+around what the forks actually emit** (who called whom, on which repo, how long,
+success or not): `usage_report.py` **ignores those always-null token fields**
+rather than printing dead columns. (`model` is recorded — `codex-default` /
+`claude-default` unless `CODEX_MODEL` / `CLAUDE_FORK_MODEL` pins one — but the
+report does not group on it.)
+
+`usage_report.py` reads both logs (`usage_codex.log` + `usage_claude.log`) and has
+two views:
+
+**Aggregate (default)** — one row per group, the at-a-glance health table:
+
+```bash
+python3 usage_report.py                 # by source / tool (default)
+python3 usage_report.py --by repo       # which repos get forked into most
+python3 usage_report.py --by day        # per-day volume
+python3 usage_report.py --by source     # codex vs claude totals
+python3 usage_report.py --json          # machine-readable
+```
+
+All `--by` groupings: `source`, `tool`, `repo`, `day`, `source-tool` (default),
+`source-repo`, `day-source`.
+
+```
+source / tool             calls    ok   err    in_kc      lat_s    avg_s    max_s
+---------------------------------------------------------------------------------
+claude / fork_to_claude       1     1     0      3.1      142.0    142.0    142.0
+codex / ask_codex             1     1     0      0.9       33.2     33.2     33.2
+codex / fork_to_codex         1     1     0      4.2      122.5    122.5    122.5
+codex / web_rag               1     0     1      0.1      430.2    430.2    430.2
+---------------------------------------------------------------------------------
+TOTAL                         4     3     1      8.3      727.9    182.0    430.2
+```
+
+Columns: `calls` total, `ok`/`err` split (success = exit 0), `in_kc` input
+kilochars, and latency `sum / avg / max` in seconds — latency and error rate are
+what matter for cloud forks, since tokens are unavailable.
+
+**Stream / live monitor** — the most recent calls, one per line, errors flagged:
+
+```bash
+python3 usage_report.py --tail 20       # last 20 calls, newest last
+python3 usage_report.py --watch         # live, refresh every 3s (Ctrl-C stops)
+python3 usage_report.py --watch 10 --tail 30   # every 10s, 30 rows
+```
+
+```
+ts (utc)              src     tool             repo                sb       in_kc     lat_s  status
+------------------------------------------------------------------------------------------------
+2026-06-17 08:31:02   codex   fork_to_codex    eai_design          ww         4.2     122.5  rc=0
+2026-06-17 09:02:55   codex   web_rag          combo               ro         0.1     430.2  timeout  <-- ERR
+```
+
+`--watch` clears and re-renders on an interval for a live dashboard of forks as
+they land; `sb` is the abbreviated sandbox / permission_mode (`ww`=workspace-write,
+`ro`=read-only, `danger`=danger-full-access, `edit`=acceptEdits, `plan`).
