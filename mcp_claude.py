@@ -86,7 +86,8 @@ def _resolve_repo(repo: str) -> str:
     return os.path.join(FORK_BASE, repo)
 
 
-def _run_claude(task: str, repo: str, permission_mode: str, tool: str) -> str:
+def _run_claude(task: str, repo: str, permission_mode: str, tool: str,
+                allowed_tools: list | None = None) -> str:
     """Run one headless `claude -p` pinned to `repo` and return its printed
     response.
 
@@ -96,6 +97,11 @@ def _run_claude(task: str, repo: str, permission_mode: str, tool: str) -> str:
     `--permission-mode` selects autonomy (`plan` = read-only, `acceptEdits` =
     may edit). stdin is detached because, when spawned by an MCP host, our stdin
     is the JSON-RPC pipe and the child would otherwise block on / steal it.
+
+    `allowed_tools` (optional) is passed to `--allowedTools` so specific tools
+    run without a permission prompt -- needed because `--permission-mode plan`
+    still gates WebSearch/WebFetch, which would otherwise be denied in the
+    non-interactive `-p` run.
     """
     workdir = _resolve_repo(repo)
     if not os.path.isdir(workdir):
@@ -107,6 +113,8 @@ def _run_claude(task: str, repo: str, permission_mode: str, tool: str) -> str:
         "--permission-mode", permission_mode,
         "--output-format", "text",
     ]
+    if allowed_tools:
+        cmd += ["--allowedTools", *allowed_tools]
     if CLAUDE_MODEL:
         cmd += ["--model", CLAUDE_MODEL]
 
@@ -211,7 +219,8 @@ def web_rag(query: str, repo: str = "") -> str:
         "Search the web for current, authoritative information and answer the "
         "following. Cite source URLs inline.\n\n" + query
     )
-    return _run_claude(grounded, repo=repo, permission_mode="plan", tool="web_rag")
+    return _run_claude(grounded, repo=repo, permission_mode="plan", tool="web_rag",
+                       allowed_tools=["WebSearch", "WebFetch"])
 
 
 if __name__ == "__main__":
