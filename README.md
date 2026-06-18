@@ -45,16 +45,16 @@ The whole design rests on five facts about this environment:
 
 ## Directory contents
 
-| File                 | Role                                                                                                                                                                   |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `up_version.csh`   | Reinstall Claude Code + Codex CLIs to latest (`npm i -g @anthropic-ai/claude-code@latest @openai/codex@latest`).                                                     |
-| `mcp_codex.py`     | MCP server giving**Claude Code** a fork into cloud **Codex** (`fork_to_codex` / `ask_codex`) + `web_rag`, each pinned to one repo as its sandbox.    |
-| `mcp_claude.py`    | MCP server giving**Codex** (or another Claude Code) a fork into a one-shot headless **`claude -p`** (`fork_to_claude` / `ask_claude`) + `web_rag`. |
-| `usage_report.py`  | Monitor the cross-fork MCP traffic from the two JSONL logs — aggregate table or live stream (see[Monitoring the traffic](#monitoring-the-traffic)).                      |
-| `skills/`          | **Shared skills** source of truth — one dir per skill (`combo-<name>/SKILL.md`), symlinked into both harnesses (see[Skill sharing across both harnesses](#skill-sharing-across-both-harnesses)).      |
-| `skills/link.sh`   | Idempotent bootstrap that symlinks `combo/skills` into each harness's search path (`.claude/skills`, `.agents/skills`).                                              |
-| `usage_codex.log`  | JSONL usage records written by `mcp_codex.py` (gitignored).                                                                                                          |
-| `usage_claude.log` | JSONL usage records written by `mcp_claude.py` (gitignored).                                                                                                         |
+| File                 | Role                                                                                                                                                                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `up_version.csh`   | Reinstall Claude Code + Codex CLIs to latest (`npm i -g @anthropic-ai/claude-code@latest @openai/codex@latest`).                                                                                     |
+| `mcp_codex.py`     | MCP server giving**Claude Code** a fork into cloud **Codex** (`fork_to_codex` / `ask_codex`) + `web_rag`, each pinned to one repo as its sandbox.                                    |
+| `mcp_claude.py`    | MCP server giving**Codex** (or another Claude Code) a fork into a one-shot headless **`claude -p`** (`fork_to_claude` / `ask_claude`) + `web_rag`.                                 |
+| `usage_report.py`  | Monitor the cross-fork MCP traffic from the two JSONL logs — aggregate table or live stream (see[Monitoring the traffic](#monitoring-the-traffic)).                                                      |
+| `skills/`          | **Shared skills** source of truth — one dir per skill (`combo-<name>/SKILL.md`), symlinked into both harnesses (see[Skill sharing across both harnesses](#skill-sharing-across-both-harnesses)). |
+| `skills/link.sh`   | Idempotent bootstrap that symlinks `combo/skills` into each harness's search path (`.claude/skills`, `.agents/skills`).                                                                          |
+| `usage_codex.log`  | JSONL usage records written by `mcp_codex.py` (gitignored).                                                                                                                                          |
+| `usage_claude.log` | JSONL usage records written by `mcp_claude.py` (gitignored).                                                                                                                                         |
 
 ### Dependency
 
@@ -353,6 +353,11 @@ they land; `sb` is the abbreviated sandbox / permission_mode (`ww`=workspace-wri
 ---
 
 ## Skill sharing across both harnesses
+
+> **Read this section before creating, editing, or sharing any skill**
+> (referenced from the global `~/.claude/CLAUDE.md` / `~/.codex/AGENTS.md`). It is the
+> single source of truth for skill layout, symlinking, naming, and the
+> rule-vs-skill-vs-MCP split across both harnesses.
 
 Skills (reusable, on-demand procedures — RTL review, sim-debug runbooks, release
 notes, Notion research) can be **shared** by both agents from a single source of
