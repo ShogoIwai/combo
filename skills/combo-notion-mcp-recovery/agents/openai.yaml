@@ -1,0 +1,4 @@
+interface:
+  display_name: "Notion MCP Recovery"
+  short_description: "Recover Codex Notion MCP startup failures"
+  default_prompt: "Use $combo-notion-mcp-recovery to diagnose and recover a Codex Notion MCP startup failure."
