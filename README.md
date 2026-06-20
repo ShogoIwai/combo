@@ -482,6 +482,16 @@ description: Use when reviewing RTL changes for reset, clocking, interface timin
 5. Report findings first, with file:line references.
 ```
 
+#### Path convention — anchor on `<launch root>`
+
+When a skill body needs to write an **absolute** path (repo locations, example
+`cd`/`ls` commands, etc.), anchor it on the **`<launch root>`** placeholder —
+e.g. `<launch root>/<repo>/verif/<dut>/...` — not on `~/rep`, `$HOME`, or any
+machine-specific absolute. `~/rep` is just one machine's symlink to the launch
+root; hardcoding it breaks the skill on other environments and obscures the
+multi-repo scope. Use the exact spelling `<launch root>` (with a space) so it
+matches the rest of this README.
+
 #### Name by origin layer (prefix convention)
 
 `combo/skills` is symlinked into **every** repo, so its names share one flat
