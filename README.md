@@ -16,7 +16,7 @@ critical path, so this directory assumes **both agents run in the cloud**.
 
 The whole design rests on five facts about this environment:
 
-1. **Both agents must handle a multi-repo workspace.** The launch root (`<launch root>`)
+1. **Both agents must handle a multi-repo workspace.** The launch root (`<launch-root>`)
    is **not one git repo** — it holds many independently-cloned repositories side
    by side (mirrored in the global `CLAUDE.md` / `AGENTS.md`). Neither agent can
    run git/search tooling at the root. Every fork is therefore **pinned to one
@@ -53,7 +53,7 @@ The whole design rests on five facts about this environment:
 | `usage_report.py`  | Monitor the cross-fork MCP traffic from the two JSONL logs — aggregate table or live stream (see[Monitoring the traffic](#monitoring-the-traffic)).                                                      |
 | `usage_codex.log`  | JSONL usage records written by `mcp_codex.py` (gitignored).                                                                                                                                          |
 | `usage_claude.log` | JSONL usage records written by `mcp_claude.py` (gitignored).                                                                                                                                         |
-| `skills/link.sh`   | Idempotent bootstrap that symlinks `combo/skills` into each harness's search path (`.claude/skills`, `.agents/skills`).                                                                          |
+| `link_skills.sh`   | Idempotent bootstrap that symlinks `combo/skills` into each harness's search path (`.claude/skills`, `.agents/skills`).                                                                          |
 | `skills/`          | **Shared skills** source of truth — one dir per skill (`combo-<name>/SKILL.md`), symlinked into both harnesses (see[Skill sharing across both harnesses](#skill-sharing-across-both-harnesses)). |
 
 ### Dependency
@@ -88,13 +88,13 @@ entire world.**
   `--permission-mode`.
 
 `repo` is resolved relative to the fork base (`CODEX_FORK_BASE` / `CLAUDE_FORK_BASE`,
-default `<launch root>`) or accepts an absolute path. As long as the call points at a real
+default `<launch-root>`) or accepts an absolute path. As long as the call points at a real
 project — pass `repo`, or set `CODEX_FORK_DEFAULT_REPO` / `CLAUDE_FORK_DEFAULT_REPO`
 — the forked agent never sees the root and the "operate at the second level or
 deeper / git fails at the root" problem cannot arise.
 
 > **Caveat:** an empty `repo` with **no** default configured resolves to the fork
-> base (`<launch root>`) — i.e. the multi-repo launch root itself. The servers do not
+> base (`<launch-root>`) — i.e. the multi-repo launch root itself. The servers do not
 > reject that, so always pass a `repo` or configure a default repo; otherwise the
 > very layout this section avoids leaks back in.
 
@@ -191,7 +191,7 @@ codex mcp add claude -- python3 $REP/combo/mcp_claude.py
 - Codex → registers **`claude`** (`mcp_claude.py`). It does **not** register
   `codex` for the same reason.
 
-(`$REP` is the launch root, e.g. `<launch root>`. Verify with `/mcp` in Claude Code or
+(`$REP` is the launch root, e.g. `<launch-root>`. Verify with `/mcp` in Claude Code or
 `codex mcp list`.)
 
 ### Tools exposed by each server
@@ -233,7 +233,7 @@ Both servers share the same shape of knobs (`CODEX_*` / `CLAUDE_*`):
 | Codex var (`mcp_codex.py`) | Claude var (`mcp_claude.py`) | Default                     | Meaning                              |
 | ---------------------------- | ------------------------------ | --------------------------- | ------------------------------------ |
 | `CODEX_BIN`                | `CLAUDE_BIN`                 | CLI on PATH → nvm fallback | Agent CLI binary                     |
-| `CODEX_FORK_BASE`          | `CLAUDE_FORK_BASE`           | `<launch root>`           | Base a relative `repo` resolves to |
+| `CODEX_FORK_BASE`          | `CLAUDE_FORK_BASE`           | `<launch-root>`           | Base a relative `repo` resolves to |
 | `CODEX_FORK_DEFAULT_REPO`  | `CLAUDE_FORK_DEFAULT_REPO`   | (empty)                     | Repo used when a call omits `repo` |
 | `CODEX_MODEL`              | `CLAUDE_FORK_MODEL`          | (empty → CLI default)      | Pin the fork model                   |
 | `CODEX_FORK_TIMEOUT`       | `CLAUDE_FORK_TIMEOUT`        | `1800`                    | Per-fork wall-clock cap (seconds)    |
@@ -388,12 +388,12 @@ Keep the skill **body** under version control in `combo/skills/`, and link it in
 both harnesses' **project-scope** search paths at the launch root:
 
 ```plain
-<launch root>/combo/skills/combo-<name>/  # the real skill (git-tracked, shared; combo- prefix)
+<launch-root>/combo/skills/combo-<name>/  # the real skill (git-tracked, shared; combo- prefix)
   SKILL.md
   references/   scripts/   …
 
-<launch root>/.claude/skills   ->  symlink to <launch root>/combo/skills  (Claude Code finds every skill)
-<launch root>/.agents/skills   ->  symlink to <launch root>/combo/skills  (Codex finds every skill)
+<launch-root>/.claude/skills   ->  symlink to <launch-root>/combo/skills  (Claude Code finds every skill)
+<launch-root>/.agents/skills   ->  symlink to <launch-root>/combo/skills  (Codex finds every skill)
 ```
 
 The link is at the **`skills` directory** level (one symlink per harness, 2 per
@@ -402,7 +402,7 @@ launch root), not per individual skill. Both harnesses follow a symlinked
 **adding a skill needs no relinking**: drop the dir into `combo/skills/` and both
 sides see it immediately.
 
-Why link into `<launch root>` project scope rather than `~/.claude` / `~/.agents`
+Why link into `<launch-root>` project scope rather than `~/.claude` / `~/.agents`
 user-global:
 
 - The body lives **once** in `combo/` (git-tracked) — no duplication, shareable
@@ -418,8 +418,8 @@ user-global:
   repo's own path / user-global `~/.agents/skills`, or name it explicitly in the
   task string (see [Skills through a Codex fork](#skills-through-a-codex-fork)).
 
-> **`<launch root>` is not a git repo** — it is the multi-repo aggregation root.
-> So `<launch root>/.claude/skills` is *not* a git-shared `<repo>/.claude/skills`;
+> **`<launch-root>` is not a git repo** — it is the multi-repo aggregation root.
+> So `<launch-root>/.claude/skills` is *not* a git-shared `<repo>/.claude/skills`;
 > it is a **local workspace project scope**. Anything you want versioned/shared
 > goes in the body under `combo/skills`, which *is* tracked.
 
@@ -429,14 +429,14 @@ Symlinks are machine-local and do not travel in git. Because the link is at the
 `skills` directory level, it is just **2 links per launch root** — re-created only
 when a new environment is set up (a freshly cloned launch root with no links yet),
 **not** when a skill is added. That makes manual setup fine, but a tiny
-bootstrap script — `combo/skills/link.sh` — keeps it idempotent:
+bootstrap script — `combo/link_skills.sh` — keeps it idempotent:
 
 ```bash
 #!/bin/bash
-# combo/skills/link.sh — expose the whole combo/skills dir to both harnesses
-mkdir -p <launch root>/.claude <launch root>/.agents
-ln -sfn <launch root>/combo/skills <launch root>/.claude/skills
-ln -sfn <launch root>/combo/skills <launch root>/.agents/skills
+# combo/link_skills.sh — expose the whole combo/skills dir to both harnesses
+mkdir -p <launch-root>/.claude <launch-root>/.agents
+ln -sfn <launch-root>/combo/skills <launch-root>/.claude/skills
+ln -sfn <launch-root>/combo/skills <launch-root>/.agents/skills
 ```
 
 `ln -sfn` makes it idempotent. Adding a skill is just "drop the dir under
@@ -446,8 +446,8 @@ ln -sfn <launch root>/combo/skills <launch root>/.agents/skills
 
 | Layer                                                   | What goes there                                                                                  |
 | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `<launch root>/combo/skills/combo-<name>`             | **Shared** skill body (`combo-` prefix) — Markdown steps, `references/`, `scripts/` |
-| `<launch root>/.claude/skills`, `…/.agents/skills` | Each is a single symlink →`combo/skills` — the shared-skill entry point for each harness     |
+| `<launch-root>/combo/skills/combo-<name>`             | **Shared** skill body (`combo-` prefix) — Markdown steps, `references/`, `scripts/` |
+| `<launch-root>/.claude/skills`, `…/.agents/skills` | Each is a single symlink →`combo/skills` — the shared-skill entry point for each harness     |
 | `<repo>/.agents/skills` (+ `<repo>/.claude/skills`) | **Repo-specific** skills — that repo's design rules, tests, review focus                  |
 | `<harness>/.agents/skills`                            | **Harness-specific** skills — simulation/lint/debug steps that assume one harness         |
 
@@ -483,14 +483,14 @@ description: Use when reviewing RTL changes for reset, clocking, interface timin
 5. Report findings first, with file:line references.
 ```
 
-#### Path convention — anchor on `<launch root>`
+#### Path convention — anchor on `<launch-root>`
 
 When a skill body needs to write an **absolute** path (repo locations, example
-`cd`/`ls` commands, etc.), anchor it on the **`<launch root>`** placeholder —
-e.g. `<launch root>/<repo>/verif/<dut>/...` — not on `~/rep`, `$HOME`, or any
+`cd`/`ls` commands, etc.), anchor it on the **`<launch-root>`** placeholder —
+e.g. `<launch-root>/<repo>/verif/<dut>/...` — not on `~/rep`, `$HOME`, or any
 machine-specific absolute. `~/rep` is just one machine's symlink to the launch
 root; hardcoding it breaks the skill on other environments and obscures the
-multi-repo scope. Use the exact spelling `<launch root>` (with a space) so it
+multi-repo scope. Use the exact spelling `<launch-root>` (with a space) so it
 matches the rest of this README.
 
 #### Name by origin layer (prefix convention)
