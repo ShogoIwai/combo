@@ -434,6 +434,7 @@ bootstrap script — `combo/skills/link.sh` — keeps it idempotent:
 ```bash
 #!/bin/bash
 # combo/skills/link.sh — expose the whole combo/skills dir to both harnesses
+mkdir -p <launch root>/.claude <launch root>/.agents
 ln -sfn <launch root>/combo/skills <launch root>/.claude/skills
 ln -sfn <launch root>/combo/skills <launch root>/.agents/skills
 ```
