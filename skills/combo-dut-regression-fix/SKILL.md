@@ -41,11 +41,20 @@ ls ../list/
 This can be long-running — run it in the background (or with a generous timeout)
 and wait for completion before checking. (Some small DUTs finish in seconds.)
 
+If the simulator dies inside the harness sandbox before producing logs (for
+example, immediate exit code 159/SIGSYS with no stdout/stderr), rerun the same
+`runsim.py` command with that harness's approved sandbox escape or permission
+escalation before debugging testcases. A common symptom is only DPIC/make output
+from the run and no `[Pass]` or `[Fail]` lines from `--chk`.
+
 ## 4. Collect results
 
 ```bash
 ../bin/runsim.py --chk
 ```
+
+`--chk` only reads existing logs and normally needs no sandbox escape. Use the
+same approved `runsim.py` permission mode only if the harness requires it.
 
 ## 5. Check every line starts with `[Pass]`
 
