@@ -53,7 +53,7 @@ The whole design rests on five facts about this environment:
 | `usage_report.py`  | Monitor the cross-fork MCP traffic from the two JSONL logs — aggregate table or live stream (see[Monitoring the traffic](#monitoring-the-traffic)).                                                      |
 | `usage_codex.log`  | JSONL usage records written by `mcp_codex.py` (gitignored).                                                                                                                                          |
 | `usage_claude.log` | JSONL usage records written by `mcp_claude.py` (gitignored).                                                                                                                                         |
-| `link_skills.sh`   | Idempotent bootstrap that symlinks `combo/skills` into each harness's search path (`.claude/skills`, `.agents/skills`).                                                                          |
+| `link_skills.sh`   | Idempotent bootstrap that symlinks each `combo/skills/<name>` into each harness's **user-global** search path (`~/.claude/skills`, `~/.agents/skills`).                                          |
 | `skills/`          | **Shared skills** source of truth — one dir per skill (`combo-<name>/SKILL.md`), symlinked into both harnesses (see[Skill sharing across both harnesses](#skill-sharing-across-both-harnesses)). |
 
 ### Dependency
@@ -382,74 +382,85 @@ safe. The real split is the **search path** — `.claude/skills` vs `.agents/ski
 harness's search path via **symlink**. (Codex follows symlinked skill folders in
 these locations, so linking works.)
 
-### Layout — single source of truth + symlinks
+### Layout — single source of truth + user-global symlinks
 
-Keep the skill **body** under version control in `combo/skills/`, and link it into
-both harnesses' **project-scope** search paths at the launch root:
+Keep the skill **body** under version control in `combo/skills/`, and link each
+skill dir into both harnesses' **user-global** search paths:
 
 ```plain
 <launch-root>/combo/skills/combo-<name>/  # the real skill (git-tracked, shared; combo- prefix)
   SKILL.md
   references/   scripts/   …
 
-<launch-root>/.claude/skills   ->  symlink to <launch-root>/combo/skills  (Claude Code finds every skill)
-<launch-root>/.agents/skills   ->  symlink to <launch-root>/combo/skills  (Codex finds every skill)
+~/.claude/skills/combo-<name>   ->  symlink to <launch-root>/combo/skills/combo-<name>  (Claude Code)
+~/.agents/skills/combo-<name>   ->  symlink to <launch-root>/combo/skills/combo-<name>  (Codex)
 ```
 
-The link is at the **`skills` directory** level (one symlink per harness, 2 per
-launch root), not per individual skill. Both harnesses follow a symlinked
-`skills` folder, so every directory under `combo/skills/` is visible at once —
-**adding a skill needs no relinking**: drop the dir into `combo/skills/` and both
-sides see it immediately.
+Why **user-global** (`~/.claude` / `~/.agents`) rather than `<launch-root>`
+project scope: each harness exposes only **one** project-scope `skills` slot at
+the launch root (`<launch-root>/.claude/skills`, `…/.agents/skills`), and that
+slot is **per-workspace** — switched independently for each launch root depending
+on which skill set that workspace should expose. `combo/` skills are meant to sit
+**one level above** that: generic procedures you want available regardless of
+which workspace currently owns the launch-root slot. Linking them user-global
+keeps them out of that contested slot, so the two never collide.
 
-Why link into `<launch-root>` project scope rather than `~/.claude` / `~/.agents`
-user-global:
+The trade-off of user-global is that the dir also holds other personal skills, so
+the link is made **per skill** (not at the `skills`-dir level). Both harnesses
+follow a symlinked skill folder, so each linked `combo-<name>` is discovered —
+but the per-skill model means **adding, removing, or renaming a skill needs a
+relink** (`combo/link_skills.sh` again). Each run first **prunes** our own stale
+links (symlinks that point back into this `combo/skills` but no longer resolve)
+and then refreshes the live ones, so a removed/renamed skill does not leave a
+broken entry behind; links owned by other personal skills are left untouched.
 
-- The body lives **once** in `combo/` (git-tracked) — no duplication, shareable
-  with the team.
-- Linking at the **launch-root project scope** (not user-global) keeps the
-  machine's personal config clean and scopes the skills to **this workspace**.
-- An **interactive** session started at the launch root discovers the links
-  naturally (Codex walks `.agents/skills` from CWD up; Claude reads the
-  project-scope `.claude/skills`). **Forks are different**: a fork is pinned to
-  one repo (`codex exec -C <repo>` / `claude -p` `cwd`), so its skill walk is
-  rooted at *that* repo, not the launch root — launch-root links are **not**
-  guaranteed to be in scope. For forks, either link the skill under the forked
-  repo's own path / user-global `~/.agents/skills`, or name it explicitly in the
-  task string (see [Skills through a Codex fork](#skills-through-a-codex-fork)).
-
-> **`<launch-root>` is not a git repo** — it is the multi-repo aggregation root.
-> So `<launch-root>/.claude/skills` is *not* a git-shared `<repo>/.claude/skills`;
-> it is a **local workspace project scope**. Anything you want versioned/shared
-> goes in the body under `combo/skills`, which *is* tracked.
+> **`<launch-root>` is not a git repo** — it is the multi-repo aggregation root,
+> and `~/.claude/skills` / `~/.agents/skills` are machine-local user config.
+> Neither is git-tracked. Anything you want versioned/shared goes in the body
+> under `combo/skills`, which *is* tracked.
+>
+> **Forks** are pinned to one repo (`codex exec -C <repo>` / `claude -p` `cwd`),
+> but they still read the **user-global** path, so linked `combo-` skills stay
+> **discoverable/available** to the fork process. That is not the same as
+> reliable auto-firing: a fork is stateless, so name the skill explicitly in the
+> task string (see [Skills through a Codex fork](#skills-through-a-codex-fork)).
 
 ### Relinking script (idempotent)
 
-Symlinks are machine-local and do not travel in git. Because the link is at the
-`skills` directory level, it is just **2 links per launch root** — re-created only
-when a new environment is set up (a freshly cloned launch root with no links yet),
-**not** when a skill is added. That makes manual setup fine, but a tiny
-bootstrap script — `combo/link_skills.sh` — keeps it idempotent:
+Symlinks are machine-local and do not travel in git. `combo/link_skills.sh`
+creates one user-global link per skill, for both harnesses, idempotently — and
+prunes its own now-dangling links first (see the script for the full guards):
 
 ```bash
 #!/bin/bash
-# combo/link_skills.sh — expose the whole combo/skills dir to both harnesses
-mkdir -p <launch-root>/.claude <launch-root>/.agents
-ln -sfn <launch-root>/combo/skills <launch-root>/.claude/skills
-ln -sfn <launch-root>/combo/skills <launch-root>/.agents/skills
+# combo/link_skills.sh — expose each combo/skills/<name> to both harnesses (user-global)
+SRC=<launch-root>/combo/skills
+for DEST in ~/.claude/skills ~/.agents/skills; do
+  mkdir -p "$DEST"
+  # prune our own stale links, then (re)link each live skill dir
+  for link in "$DEST"/*; do
+    [ -L "$link" ] || continue
+    case "$(readlink "$link")" in "$SRC"/*) [ -d "$(readlink "$link")" ] || rm -f "$link" ;; esac
+  done
+  for skill in "$SRC"/*/; do
+    [ -d "$skill" ] || continue
+    ln -sfn "${skill%/}" "$DEST/$(basename "$skill")"
+  done
+done
 ```
 
-`ln -sfn` makes it idempotent. Adding a skill is just "drop the dir under
-`combo/skills/`" — no relink needed, since the `skills` dir itself is the link.
+`ln -sfn` makes it idempotent. Re-run it after **adding, removing, or renaming** a
+dir under `combo/skills/`; the prune pass keeps removed/renamed skills from
+leaving a broken link behind.
 
 ### Where each procedure belongs
 
 | Layer                                                   | What goes there                                                                                  |
 | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | `<launch-root>/combo/skills/combo-<name>`             | **Shared** skill body (`combo-` prefix) — Markdown steps, `references/`, `scripts/` |
-| `<launch-root>/.claude/skills`, `…/.agents/skills` | Each is a single symlink →`combo/skills` — the shared-skill entry point for each harness     |
-| `<repo>/.agents/skills` (+ `<repo>/.claude/skills`) | **Repo-specific** skills — that repo's design rules, tests, review focus                  |
-| `<harness>/.agents/skills`                            | **Harness-specific** skills — simulation/lint/debug steps that assume one harness         |
+| `~/.claude/skills/combo-*` **and** `~/.agents/skills/combo-*` | **Shared** entry point — per-skill user-global symlinks → `combo/skills/combo-*`, linked into **both** harnesses (this is what `link_skills.sh` does) |
+| `~/.claude/skills/<name>` **or** `~/.agents/skills/<name>` (one only) | **Harness-specific** skills — a real skill placed in just **one** harness's user-global dir (Claude-only → `~/.claude/skills`, Codex-only → `~/.agents/skills`); shared vs harness-specific is simply "both dirs vs one" |
+| `<repo>/.claude/skills`, `<repo>/.agents/skills`     | **Repo-specific** skills — that repo's design rules, tests, review focus (project scope, travel with the repo in git) |
 
 And the rule-vs-skill split:
 
@@ -506,7 +517,7 @@ the two must match):
 | ------------------------------------------------------------- | -------------- | -------------------- |
 | `combo/skills` — **shared**                          | `combo-`     | `combo-rtl-review` |
 | `<repo>/.claude(.agents)/skills` — **repo-specific** | `<repo>-`    | `cpu-sim-debug`    |
-| `<harness>/.agents/skills` — **harness-specific**    | `<harness>-` | `claude-lint`      |
+| `~/.claude/skills` **or** `~/.agents/skills` (one only) — **harness-specific** | `<harness>-` | `claude-lint`      |
 
 The prefix is for **human/listing disambiguation and collision avoidance**, not
 for triggering — auto-selection is still driven by `description`, so keep that
