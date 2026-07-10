@@ -1,4 +1,4 @@
 #!/usr/bin/csh
 npm instal -g @anthropic-ai/claude-code@latest
-npm instal -g @openai/codex@0.142.5
+npm instal -g @openai/codex@latest
 
