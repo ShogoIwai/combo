@@ -5,12 +5,19 @@
 # Usage:
 #   ./convert.sh input.md [output.pdf]
 #   ./convert.sh docs/*.md                 # batch; each -> same-name .pdf
-#   PDF_OPTIONS='{"format":"A4","margin":"20mm"}' ./convert.sh input.md
+#   PDF_OPTIONS='{"format":"A4","margin":"15mm"}' ./convert.sh input.md
 #
 # Prereqs (one-time, see SKILL.md):
 #   npm install -g md-to-pdf
 #   npx puppeteer browsers install chrome   # downloads Chromium into ~/.cache/puppeteer
 set -euo pipefail
+
+# Always pass --pdf-options. Callers may override via the PDF_OPTIONS env var;
+# otherwise this A4 / 15mm-margin default is applied on every conversion.
+# (Assigned in two steps: a JSON default inside ${:=} would have its closing
+#  brace swallowed by the parameter-expansion syntax.)
+PDF_OPTIONS="${PDF_OPTIONS:-}"
+[ -n "$PDF_OPTIONS" ] || PDF_OPTIONS='{"format":"A4","margin":"15mm"}'
 
 if ! command -v md-to-pdf >/dev/null 2>&1; then
   echo "error: md-to-pdf not found. Install with: npm install -g md-to-pdf" >&2
@@ -24,11 +31,7 @@ if [ "$#" -eq 0 ]; then
 fi
 
 gen_pdf() {  # run md-to-pdf on $1, echo the file it produced (extension replaced with .pdf)
-  if [ -n "${PDF_OPTIONS:-}" ]; then
-    md-to-pdf "$1" --pdf-options "$PDF_OPTIONS" 1>&2   # keep progress off stdout
-  else
-    md-to-pdf "$1" 1>&2
-  fi
+  md-to-pdf "$1" --pdf-options "$PDF_OPTIONS" 1>&2   # PDF_OPTIONS always set; keep progress off stdout
   printf '%s\n' "${1%.*}.pdf"   # matches md-to-pdf's path.parse() extension swap (any case)
 }
 

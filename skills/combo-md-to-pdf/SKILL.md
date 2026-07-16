@@ -38,12 +38,15 @@ install commands if `md-to-pdf` is missing.
 # Batch: each file -> same-name .pdf
 <launch-root>/combo/skills/combo-md-to-pdf/convert.sh docs/*.md
 
-# Page/margin options (JSON, passed to md-to-pdf --pdf-options)
-PDF_OPTIONS='{"format":"A4","margin":"20mm"}' \
+# Override page/margin options (JSON, passed to md-to-pdf --pdf-options)
+PDF_OPTIONS='{"format":"A4","margin":"15mm"}' \
   <launch-root>/combo/skills/combo-md-to-pdf/convert.sh input.md
 ```
 
-Or call the CLI directly: `md-to-pdf input.md`.
+`--pdf-options` is **always** passed to md-to-pdf. When `PDF_OPTIONS` is not
+set, `convert.sh` applies a default of `{"format":"A4","margin":"15mm"}`; set the
+env var to override it. Call the CLI directly with `md-to-pdf input.md` only if
+you deliberately want md-to-pdf's own defaults.
 
 ## Notes
 
