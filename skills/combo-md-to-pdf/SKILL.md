@@ -18,8 +18,8 @@ reached.
 | **Input**          | One or more readable `.md` files; optional explicit output path; optional `PDF_OPTIONS` JSON. See **Prerequisites** for the tools needed.  |
 | **type**                 | `one-shot` — each PDF is fully re-rendered from its Markdown source on every run and overwritten in place; an existing PDF is never used as a source. |
 | **Output**         | One `.pdf` per input file — the explicit output path if given, otherwise the input basename with `.pdf` in the same directory.            |
-| **goal**           | Every requested PDF exists, is a valid non-empty PDF with at least one page, and its content renders the Markdown correctly (no missing/tofu Japanese glyphs, code blocks and tables intact). |
-| **Verification**         | Run `convert.sh` and check exit code 0. For each output: the file exists, is non-empty, starts with the `%PDF-` magic bytes, and reports >= 1 page (e.g. `pdfinfo`). Then open or text-extract one page and confirm Japanese text, a code block and a table render correctly. Confirm one PDF was produced per input file. |
+| **goal**           | Every requested PDF exists, is a valid non-empty PDF with at least one page, and renders the constructs its source actually contains — Japanese text without tofu, and code blocks and tables intact. |
+| **Verification**         | Run `convert.sh`; exit code must be 0. For each output: the file exists, is non-empty, starts with the `%PDF-` magic bytes, and `pdfinfo` reports >= 1 page. Then, **only for the constructs present in that source**, extract text with `pdftotext` and confirm the Japanese runs, the code-block text and the table cell text all survive; inspect the rendered page visually when layout or glyph coverage is in doubt, since text extraction cannot detect tofu or broken table borders. Confirm one PDF was produced per input file. |
 | **loop limit** | 3                                                                                                                                          |
 
 ## When to Use
@@ -28,16 +28,21 @@ reached.
 - Producing a shareable PDF from a design note / README / report written in Markdown
 - Batch-converting a directory of `.md` files
 
-## Prerequisites (one-time)
+## Prerequisites
 
 ```bash
 npm install -g md-to-pdf
-npx puppeteer browsers install chrome   # downloads Chromium into ~/.cache/puppeteer
+npx puppeteer browsers install chrome   # one-time Chromium download
 ```
 
-Both are one-time setup; Chromium is cached under `~/.cache/puppeteer/chrome/...`,
-so a fresh clone needs the download once (~150MB). The `convert.sh` wrapper
-prints the exact install commands if `md-to-pdf` is missing.
+1. **md-to-pdf + a Puppeteer Chromium** — always required; the browser download
+   is a one-time setup step. `convert.sh` prints the exact install commands when
+   `md-to-pdf` is missing, but it does **not** preflight Chromium — that failure
+   surfaces as an md-to-pdf error.
+2. **A CJK font installed system-wide** — required for Japanese output. Chromium
+   alone does not guarantee glyph coverage; without a suitable font the text
+   renders as tofu while the command still succeeds.
+3. **poppler-utils (`pdfinfo`, `pdftotext`)** — required by the Verification step.
 
 ## Usage
 
@@ -67,9 +72,12 @@ you deliberately want md-to-pdf's own defaults.
    and treat them as the only completion criteria for this run. Do not relax the
    goal mid-run; if it must change, stop and report why.
 2. **Check the inputs.** Confirm every `.md` input exists and is readable and
-   that the Prerequisites are satisfied. If anything is missing, do not start:
-   report `blocked` (not `failed`) with what is missing and how to resume (the
-   wrapper prints the install commands).
+   that the Prerequisites are satisfied — the wrapper only checks that
+   `md-to-pdf` is on `PATH` and that it received arguments, and leaves input
+   errors to md-to-pdf. Note which of Japanese text / code blocks / tables each
+   source contains, since that determines what step 5 must check. If anything is
+   missing, do not start: report `blocked` (not `failed`) with what is missing and
+   how to resume.
 3. **Handle existing output.** This task is `one-shot`. If a target `.pdf`
    already exists, confirm it is a file this skill may replace, then re-render it
    in full from the Markdown source.
@@ -88,7 +96,10 @@ you deliberately want md-to-pdf's own defaults.
    verification result, number of attempts, any remaining cause, and what is
    needed to resume.
 
-## Notes
+## Limitations
 
-- For a pandoc-based PDF instead, a PDF engine (weasyprint / tectonic / xelatex)
-  must be installed separately.
+- **Batch vs. explicit-output is decided by a filename heuristic**: exactly two
+  arguments whose second ends in `.pdf` always mean input + explicit output. A
+  two-file batch whose second input is named `*.pdf` cannot be expressed.
+- Exit codes: missing `md-to-pdf` exits 1, no arguments exits 2; conversion,
+  `mkdir` and `mv` errors propagate under `set -e`.

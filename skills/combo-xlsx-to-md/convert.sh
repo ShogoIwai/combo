@@ -109,23 +109,36 @@ else:
         print('Error: neither openpyxl nor xlrd is installed.', file=sys.stderr)
         sys.exit(1)
 
+# USE_OPENPYXL tracks which library actually opened this workbook. It must not
+# be confused with HAS_OPENPYXL (merely: openpyxl is importable). A legacy .xls
+# is always read with xlrd, even on a machine that also has openpyxl installed.
 if ext in ('.xlsx', '.xlsm') and HAS_OPENPYXL:
     wb = _xl.load_workbook(input_path, read_only=True, data_only=True)
+    USE_OPENPYXL = True
 elif HAS_XLRD:
     wb = _xr.open_workbook(input_path)
+    USE_OPENPYXL = False
+elif HAS_OPENPYXL:
+    wb = _xl.load_workbook(input_path, read_only=True, data_only=True)
+    USE_OPENPYXL = True
 else:
     print('Error: unsupported format.', file=sys.stderr)
     sys.exit(1)
+
+def is_blank(v):
+    # openpyxl yields None for an empty cell; str(None) is 'None', so None must
+    # be tested before falling back to the string form.
+    return v is None or str(v).strip() == ''
 
 def trim_cells(rows):
     trimmed = []
     for row in rows:
         r = list(row)
-        while r and str(r[-1]).strip() == '':
+        while r and is_blank(r[-1]):
             r.pop()
         if r:
             trimmed.append(r)
-    while trimmed and all(str(c).strip() == '' for c in trimmed[-1]):
+    while trimmed and all(is_blank(c) for c in trimmed[-1]):
         trimmed.pop()
     return trimmed
 
@@ -154,7 +167,7 @@ def rows_to_md(rows):
             lines.append('| ' + ' | '.join(['---'] * ncols) + ' |')
     return '\n'.join(lines) + '\n\n'
 
-sheet_names = list(wb.sheetnames) if HAS_OPENPYXL else list(wb.sheet_names())
+sheet_names = list(wb.sheetnames) if USE_OPENPYXL else list(wb.sheet_names())
 
 if list_only:
     for name in sheet_names:
@@ -165,7 +178,7 @@ md_lines = [f'# {os.path.basename(input_path)}\n\n']
 
 for sname in sheet_names:
     try:
-        if HAS_OPENPYXL:
+        if USE_OPENPYXL:
             ws = wb[sname]
             rows_raw = list(ws.iter_rows(values_only=True))
         else:
@@ -175,12 +188,9 @@ for sname in sheet_names:
         print(f'Warning: could not read sheet \"{sname}\": {e}', file=sys.stderr)
         continue
 
-    if not rows_raw or (len(rows_raw) == 1 and all(str(c).strip() == '' for c in rows_raw[0])):
-        print(f'Skipping empty sheet: {sname}', file=sys.stderr)
-        continue
-
     rows = trim_cells(rows_raw)
     if not rows:
+        print(f'Skipping empty sheet: {sname}', file=sys.stderr)
         continue
 
     md_lines.append(f'## {sname}\n\n')
