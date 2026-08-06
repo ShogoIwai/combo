@@ -1,0 +1,34 @@
+{
+  "_comment": [
+    "work/review.json のスキーマ (見本)。手順 8 の『別モデルによる反証レビュー』の結果を",
+    "ここに構造化して保存する。check_report.py の G15 がこのファイルを必須の検査対象にする。",
+    "自分で埋めるのではなく、別モデル (例: mcp__codex__ask_codex) にレポートと",
+    "work/ledger.json を読ませ、その回答を写して作る。note は対象ごとに固有の文にする",
+    "(複製は G15 で落ちる)。supported / agree / specific が false のものは台帳へ戻して直し、",
+    "直したうえで再レビューする。false のまま PASS は取れない。"
+  ],
+  "reviewer": "codex (GPT-5.5) via mcp__codex__ask_codex",
+  "date": "2026-08-06",
+  "facts": {
+    "C1": {
+      "supported": true,
+      "note": "出典の当該段落が restated の数値と時期を明示しており、主張の範囲を超えていない"
+    },
+    "C7": {
+      "supported": true,
+      "note": "引用はプレスリリース本文で、CORRECTED の言い直しと発表主体が一致している"
+    }
+  },
+  "kinds": {
+    "C5": {
+      "agree": true,
+      "note": "数値を含むが登壇者の断定ではなく本人の推測なので opinion 裁定に同意する"
+    }
+  },
+  "stance_specific": {
+    "4.1 検証チームへの影響": {
+      "specific": true,
+      "note": "読み手である検証チームの担当範囲に固有の打ち手で、一般論に置き換えられない"
+    }
+  }
+}
