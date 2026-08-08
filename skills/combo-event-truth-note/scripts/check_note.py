@@ -36,20 +36,23 @@ SECTIONS = [
     "§3 考えたこと（思考）",
     "§4 求めていること（欲求）",
     "§5 まだ言葉にならないこと",
-    "§6 借り物の言葉と言い換え",
+    "§6 手短に済ませた言葉と、書き足したこと",
     "§7 メモの外で調べたこと（深掘り）",
     "§8 エッセンス（肉付け）",
     "§9 核の一文と次の問い",
     "§10 出典",
 ]
 LAYER_SECTION = {"事実": 1, "感情": 2, "思考": 3, "欲求": 4, "借り物": 6}
+# 表題を改めた章の旧表記。過去に書いたノートを再検査したときに G10 で黙って
+# 落ちないよう別名として受ける（新規は SECTIONS 側の表題で書くこと）。
+LEGACY_TITLES = {"§6 借り物の言葉と言い換え": "§6 手短に済ませた言葉と、書き足したこと"}
 PASTED = [1, 2, 3, 4, 5, 6, 10]          # 生成された箇条書きを逐語で貼る章
 BLOCKED = {7: "D", 8: "E"}               # 生成されたブロックを逐語で貼る章
 
 ESSENCE_MIN, ESSENCE_MAX = 3, 5
 FLESH_MIN = 120
 QUOTE_MIN = 10
-CORRECTED_MAX_RATIO = 0.9               # これ以上メモに似た「訂正」は空洞
+CORRECTED_MAX_RATIO = 0.9               # これ以上メモに似た「更新」は中身が無い
 
 CLICHES = [
     "勉強になった", "勉強になりました", "有意義", "気づきが多", "学びが多",
@@ -57,6 +60,18 @@ CLICHES = [
     "刺激を受け", "モチベーションが上が", "視野が広がった", "学びが深ま",
     "引き続き頑張", "興味深かった", "非常に良かった", "とても良かった",
     "改めて実感", "改めて感じた", "多くの学びを得",
+]
+# 自責の語彙。ノートを反省文に変えるのはこのスキルの目的ではないので、
+# §9 とエッセンスの地の文からは締め出す（「」で名指すのは可）。
+# 自責の語彙。**感情としての自責は §2/§3 に書いてよい**（それが本当なら消さない）。
+# ここで弾くのは「ノートの結語を自己採点で閉じる」構図だけなので、検査対象は
+# エッセンスの statement と §9 の核の一文の行に限る。
+# 単漢字・広い部分文字列（怠・未熟・至らな 等）は「倦怠」「未熟児」「反省会」まで
+# 巻き込むので採らない。自己言及が明らかな句だけを並べる。
+SELF_BLAME = [
+    "反省すべき", "反省した", "反省している", "べきだった", "恥ずかしい",
+    "情けない", "浅はかだった", "自分が悪い", "自戒", "私の落ち度",
+    "自分の落ち度", "怠っていた", "怠慢だった", "ダメだった", "駄目だった",
 ]
 FIRST_PERSON = re.compile(r"(私|わたし|自分|僕|ぼく|俺|おれ|うち)")
 PLACEHOLDER = re.compile(r"(<[^>\n]{1,60}>|＜[^＞\n]{1,60}＞|TODO|TBD|FIXME|xxx|XXX)")
@@ -204,6 +219,7 @@ def split_sections(note: str):
         m = re.match(r"^##[ \t　]+(.+?)\s*$", line)
         if m:
             title = re.sub(r"\s+", " ", m.group(1)).strip()
+            title = LEGACY_TITLES.get(title, title)
             idx = next((i for i, s in enumerate(SECTIONS) if s == title), None)
             if idx is None:
                 tag = title.split()[0] if title.split() else title
@@ -238,7 +254,7 @@ def gen(work, name):
 def fact_line(r):
     s = f"- [{r['id']}] {r.get('own_words', '')} 〔{r.get('status', '')}〕"
     if r.get("status") == "CORRECTED":
-        s += f" ／訂正: {r.get('corrected_to', '')}"
+        s += f" ／わかったこと: {r.get('corrected_to', '')}"
     return s
 
 
@@ -284,7 +300,8 @@ def cmd_report(work):
         f"### {e['id']} {e.get('statement', '')}\n"
         f"- 由来: {', '.join(e.get('from') or [])}\n"
         f"- 根拠: {', '.join(e.get('grounds') or [])}\n"
-        f"- 落としたもの: {e.get('cut', '')}\n\n{e.get('flesh', '')}"
+        f"- 落としたもの: {e.get('cut', '')}\n"
+        f"- 次も続けたいこと: {e.get('keep', '')}\n\n{e.get('flesh', '')}"
         for e in essence) + ("\n" if essence else ""))
 
     seen, src = set(), []
@@ -540,7 +557,7 @@ def cmd_check(note_path, work, memos):
 
     b_bad = [r["id"] for r in rows if r.get("layer") == "借り物"
              and str(r.get("borrowed_phrase", "")) not in sec.get(6, "")]
-    R.add("G13 §6 に借り物の原文を残す", not b_bad, f"{b_bad[:5]}")
+    R.add("G13 §6 に手短に済ませた原文を残す", not b_bad, f"{b_bad[:5]}")
 
     # ---- G14 深掘り（ID 一意・連番・本文逐語）
     bad = []
@@ -592,6 +609,8 @@ def cmd_check(note_path, work, memos):
             ebad.append(f"{e['id']}:grounds に実在しない ID")
         if len(str(e.get("cut", "")).strip()) < 20:
             ebad.append(f"{e['id']}:cut が 20 字未満")
+        if len(str(e.get("keep", "")).strip()) < 20:
+            ebad.append(f"{e['id']}:keep（次も続けたいこと）が 20 字未満")
         flesh = str(e.get("flesh", "")).strip()
         if len(flesh) < FLESH_MIN:
             ebad.append(f"{e['id']}:flesh が {FLESH_MIN} 字未満（肉付け不足）")
@@ -643,10 +662,16 @@ def cmd_check(note_path, work, memos):
         eids_in = set(EID_RE.findall(cores[0])) & set(eids)
         if not eids_in:
             bad.append("核の一文と**同じ行**に実在する E# が無い")
+    todos = [re.sub(r"^-\s*次にやること\s*[:：]\s*", "", l.strip())
+             for l in s9raw.splitlines()
+             if re.match(r"^-\s*次にやること\s*[:：]", l.strip())]
+    if not any(len(t) >= 10 for t in todos):
+        bad.append("「- 次にやること:」が 10 字以上で 1 件も無い")
     qs = [q for q in qs if re.search(r"[?？]\s*$", q)]
     if len(set(norm(q) for q in qs)) < 2:
         bad.append(f"「?」で終わる次の問いが {len(set(norm(q) for q in qs))} 件（2 件以上・別内容）")
-    R.add("G16 §9 核の一文（1 行・一人称 30 字以上・同じ行に E#）＋次の問い 2 件以上", not bad,
+    R.add("G16 §9 核の一文（1 行・一人称 30 字以上・同じ行に E#）＋次の問い 2 件以上"
+          "＋次にやること 1 件以上", not bad,
           f"{bad[:3]}")
 
     # ---- G17 §10 は生成物の逐語（G11 で一致検査済み）＋ 実取得 URL のみ
@@ -656,7 +681,7 @@ def cmd_check(note_path, work, memos):
     R.add("G17 §10 の URL が裏取りに使った実取得済み URL と一致", listed == used and not unfetched,
           f"欠落={sorted(used - listed)[:2]} 余剰={sorted(listed - used)[:2]} 未取得={sorted(unfetched)[:2]}")
 
-    # ---- G18〜G20
+    # ---- G18〜G21
     R.add("G18 §0 が「誰にも見せない」宛先を宣言", "誰にも見せない" in sec.get(0, ""))
     ph = PLACEHOLDER.findall(note)
     R.add("G19 placeholder・山括弧ゼロ", not ph, f"{ph[:5]}")
@@ -665,6 +690,15 @@ def cmd_check(note_path, work, memos):
     R.add("G20 §0 は summary.md の逐語（件数を手で書かない）",
           bool(gen0) and norm(gen0) in norm(note),
           "check_note.py report を回して §0 に貼ること")
+
+    blame = []
+    for e in essence:
+        t = QUOTED.sub("", str(e.get("statement", "")))
+        blame += [f"{e['id']}:{w}" for w in SELF_BLAME if w in t]
+    core_line = QUOTED.sub("", cores[0]) if len(cores) == 1 else ""
+    blame += [f"§9核:{w}" for w in SELF_BLAME if w in core_line]
+    R.add("G21 結語（エッセンスの statement・§9 の核の一文）を自己採点で閉じない"
+          "（自責の感情そのものは §2/§3 に書いてよい）", not blame, f"{blame[:5]}")
 
     return R.report()
 
