@@ -3,12 +3,14 @@
 ゲート検査 (check)。
 
   python3 check_report.py report --work <work>
-      work/ledger.json から §1 判定サマリ / §6 裏取り台帳 / §7 出典一覧 を生成する。
-      件数はここでしか作らない (本文に手で書かせないため)。
+      work/ledger.json から 付録D 判定サマリ / 付録E 裏取り台帳 / 付録F 出典一覧 を
+      生成する。件数はここでしか作らない (本文に手で書かせないため)。
+      **これらは付録**であって本文ではない — 本文 (§0〜§3) は散文が主役で、
+      台帳やチャンク単位の表を前面に出さない (G16)。
 
   python3 check_report.py check --report <out.md> --work <work>
                                [--notes a.md b.md] [--stance s.md]
-      16 ゲート。exit 0 で PASS、1 で FAIL、2 で入力不備。
+      17 ゲート。exit 0 で PASS、1 で FAIL、2 で入力不備。
       --notes/--stance を渡すと manifest のパス申告を信用せず、その入力で再現照合する。
 
 ## 検査できることの限界 (正直に書いておく)
@@ -45,7 +47,7 @@ from init_ledger import build_claims, norm  # noqa: E402
 
 PUBLIC_SOURCED = ("CONFIRMED", "CORRECTED", "PARTIAL")
 PRIVATE = "PRIVATE_PRIMARY"          # 非公開の一次資料しか根拠が無い (公開URLでは裏取り不能)
-BODY_STATUS = PUBLIC_SOURCED + (PRIVATE,)   # §2 に載せてよい / §4 の根拠にしてよい
+BODY_STATUS = PUBLIC_SOURCED + (PRIVATE,)   # §1 に載せてよい / §2 の根拠にしてよい
 FACT_STATUS = BODY_STATUS + ("UNVERIFIED",)
 KINDS = ("fact", "opinion")
 
@@ -65,17 +67,32 @@ DATE_RE = re.compile(r"^\d{4}(-\d{2}(-\d{2})?)?$")
 BAD_HOSTS = {"example.com", "example.org", "example.net", "localhost", "test.com"}
 QUOTE_MIN = 10
 
+# 本文 (§0〜§3) は散文が主役。台帳・サマリ・出典などの機械生成表は付録 (§6〜§9) へ回す。
 SECTIONS = [
-    (0, "入力と作成条件"),
-    (1, "判定サマリ"),
-    (2, "事実情報（公開情報で裏取り済み）"),
-    (3, "私見・解釈の切り分け"),
-    (4, "自組織メンバーへの考察"),
-    (5, "未確認事項・要フォロー"),
-    (6, "裏取り台帳"),
-    (7, "出典一覧"),
+    (0, "はじめに（この報告の読み方）"),
+    (1, "事実編（会場情報と裏取り結果）"),
+    (2, "考察（自組織メンバー向け）"),
+    (3, "まとめ"),
+    (4, "付録A. 未確認事項・要フォロー"),
+    (5, "付録B. 私見の切り分け"),
+    (6, "付録C. 入力と作成条件"),
+    (7, "付録D. 判定サマリ"),
+    (8, "付録E. 裏取り台帳"),
+    (9, "付録F. 出典一覧"),
 ]
-GEN_FILES = {0: "section0.md", 1: "summary.md", 6: "ledger_table.md", 7: "sources.md"}
+GEN_FILES = {6: "section0.md", 7: "summary.md", 8: "ledger_table.md", 9: "sources.md"}
+BODY_SECTIONS = (0, 1, 2, 3)   # 散文で書く本文
+# G16 の下限 (いずれも記号・空白を除いた実質文字数)。短いカンファレンスでも
+# 「読み物として成立する最小限」に置いている。
+SEC0_PROSE_MIN = 120           # §0 はじめに の地の文
+# §1 全体の地の文は fact 件数に比例させる (fact が 2〜3 件しかない短い会議で
+# 一律 200 字を要求すると水増しを促すため)。80 + 40×fact 件数、上限 400。
+SEC1_PROSE_BASE, SEC1_PROSE_PER_FACT, SEC1_PROSE_CAP = 80, 40, 400
+THEME_PROSE_MIN = 40           # §1 の ### テーマごとの地の文 (表だけのテーマを禁止)
+ITEM_MIN = 200                 # §2 の ### 項目 (地の文 + 箇条書き)
+SEC3_MIN = 200                 # §3 まとめ 全体
+SEC3_PROSE_MIN = 80            # §3 まとめ の地の文 (箇条書きだけの羅列を禁止)
+CIDS_PER_BLOCK_MAX = 3         # 1 つの記述 (段落・箇条書き行・表行) に置ける CID の上限
 
 
 def die(msg: str) -> None:
@@ -156,7 +173,7 @@ def do_report(work: pathlib.Path) -> None:
     undecided = [r for r in rows if r.get("kind") not in KINDS]
     by = {s: [r for r in facts if r.get("status") == s] for s in FACT_STATUS}
 
-    s = ["## 1. 判定サマリ", "",
+    s = ["## 7. 付録D. 判定サマリ", "",
          "| 区分 | 件数 |", "| ---- | ---- |",
          f"| メモから抽出した claim | {len(rows)} |",
          f"| うち一次情報(fact) | {len(facts)} |",
@@ -172,7 +189,7 @@ def do_report(work: pathlib.Path) -> None:
           "> UNVERIFIED=公開情報が見つからず未確認。"]
     (work / "summary.md").write_text("\n".join(s) + "\n", encoding="utf-8")
 
-    t = ["## 6. 裏取り台帳", "",
+    t = ["## 8. 付録E. 裏取り台帳", "",
          "| ID | 区分 | 判定 | メモ上の記述 | 事実としての言い直し | 判定根拠 | 出典 |",
          "| -- | ---- | ---- | ------------ | -------------------- | -------- | ---- |"]
     for r in rows:
@@ -195,7 +212,7 @@ def do_report(work: pathlib.Path) -> None:
         for x in r.get("sources") or []:
             if isinstance(x, dict) and x.get("url") and x["url"] not in seen:
                 seen[x["url"]] = x
-    u = ["## 7. 出典一覧", "",
+    u = ["## 9. 付録F. 出典一覧", "",
          "| # | 出典 | 発行元 | 公開日 | 参照日 | 取得 | URL |",
          "| - | ---- | ------ | ------ | ------ | ---- | --- |"]
     for i, (url, x) in enumerate(seen.items(), 1):
@@ -205,7 +222,7 @@ def do_report(work: pathlib.Path) -> None:
             f"| {cell(url)} |"
         )
     u += ["", "> 本節はスクリプト生成物 (`work/sources.md`)。取得列は fetch_sources.py の HTTP status。",
-          "> 非公開の一次資料 (PRIVATE_PRIMARY) は URL を持たないので §6 の出典欄に出る。"]
+          "> 非公開の一次資料 (PRIVATE_PRIMARY) は URL を持たないので 付録E (§8) の出典欄に出る。"]
     (work / "sources.md").write_text("\n".join(u) + "\n", encoding="utf-8")
     print(f"OK: summary.md / ledger_table.md / sources.md を生成 "
           f"({len(rows)} rows, {len(seen)} sources)")
@@ -244,6 +261,65 @@ def table_rows(body: str) -> list[list[str]]:
             continue
         out.append(cells)
     return out
+
+
+LIST_RE = re.compile(r"^([-*]\s+|\d+\.\s+|>)")
+
+
+def _kind_of_line(s: str) -> str:
+    """1 行を prose / list / table / skip (見出し・空行) に分類する。"""
+    if not s or s.startswith("#"):
+        return "skip"
+    if s.startswith("|"):
+        return "table"
+    return "list" if LIST_RE.match(s) else "prose"
+
+
+def blocks_of(body: str) -> list[str]:
+    """記述の「まとまり」を返す。
+
+    箇条書き行・表行は **1 行 1 ブロック**、地の文は空行/見出し/リストで区切られた
+    **段落を 1 ブロック**にする (物理行の折り返しで段落を割らない)。§1 が散文でも
+    箇条書きでも表でも、同じやり方で「この記述にこの CID がある」を見られる。
+    """
+    out: list[str] = []
+    buf: list[str] = []
+
+    def flush() -> None:
+        if buf:
+            out.append(" ".join(buf))
+            buf.clear()
+
+    for ln in body.split("\n"):
+        s = ln.strip()
+        k = _kind_of_line(s)
+        if k == "prose":
+            buf.append(s)
+            continue
+        flush()
+        if k in ("list", "table"):
+            out.append(s)
+    flush()
+    return out
+
+
+def prose_paragraphs(body: str) -> list[str]:
+    """地の文の段落だけを返す (見出し・箇条書き・表・引用は除く)。"""
+    return [b for b in blocks_of(strip_noise(body))
+            if _kind_of_line(b) == "prose"]
+
+
+def char_kinds(body: str) -> tuple[int, int, int]:
+    """(地の文, 箇条書き, 表) の**文字数** (記号・空白を除いた実質量) を返す。
+
+    行数で測ると「短い地の文を何行にも割って比率を作る」水増しが通るので、
+    比率判定は文字数で行う。
+    """
+    n = {"prose": 0, "list": 0, "table": 0, "skip": 0}
+    for ln in strip_noise(body).split("\n"):
+        s = ln.strip()
+        n[_kind_of_line(s)] += len(text_key(s))
+    return n["prose"], n["list"], n["table"]
 
 
 def do_check(report: pathlib.Path, work: pathlib.Path,
@@ -297,7 +373,7 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
             ok, detail = False, "stance ファイルが消えた/変わった"
         if ok:
             # G13 が読む work/stance.md が、正本の stance と一致していること
-            # (work 側だけに §4 で使った語を足して立場照合をすり抜けるのを防ぐ)
+            # (work 側だけに §2 で使った語を足して立場照合をすり抜けるのを防ぐ)
             wp = work / "stance.md"
             if not wp.is_file() or wp.read_text(encoding="utf-8").strip() != norm(
                     stance_p.read_bytes().decode("utf-8")).strip():
@@ -450,7 +526,7 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
     secs, order = split_sections(md_raw)
     normt = lambda s: unicodedata.normalize("NFKC", s).strip()
     ok = ([(n, normt(t)) for n, t in order] == [(n, normt(t)) for n, t in SECTIONS])
-    g("G9a 章立て (§0〜§7 が正しい順・正確な表題で 1 回ずつ)", ok, f"{order}")
+    g("G9a 章立て (§0〜§9 が正しい順・正確な表題で 1 回ずつ)", ok, f"{order}")
     for num, fname in GEN_FILES.items():
         p = work / fname
         if not p.is_file():
@@ -460,49 +536,46 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
         g(f"G9b §{num} 機械生成ブロック ({fname})", secs.get(num, "").strip() == body,
           "当該章の中身が生成物と一致しない (手で書き換えていないか)")
 
-    # --- G10 §2 は裏取り済み fact を 1 項目ずつ・restated 逐語 --------------
-    s2 = strip_noise(secs.get(2, ""))
+    # --- G10 §1 事実編: テーマ配下の散文に裏取り済み fact が全件・restated 逐語 ---
+    s1 = strip_noise(secs.get(1, ""))
     body_facts = [r for r in rows if r.get("kind") == "fact" and r.get("status") in BODY_STATUS]
-    items2: list[tuple[list[str], str]] = []
-    theme = False
+    blocks1 = blocks_of(s1)
+    themes1 = re.split(r"^###\s+", s1, flags=re.M)[1:]
     bad = []
-    for line in s2.split("\n"):
-        if re.match(r"^###\s+\S", line):
-            theme = True
-            continue
-        if re.match(r"^\s*[-*]\s+\S", line):
-            body = re.sub(r"^\s*[-*]\s+", "", line)
-            ids = cids(line)
-            if not theme:
-                bad.append(f"テーマ見出しの前に項目がある: {body[:24]}")
-            if len(ids) != 1:
-                # CID 0 個 = 根拠のない記述の紛れ込み / 2 個以上 = 1 項目への詰め込み
-                bad.append(f"項目の CID が {len(ids)} 個 (1 個であること): {body[:24]}")
-                continue
-            items2.append((ids, body))
-        elif line.strip().startswith("|"):
-            bad.append("§2 に表がある (箇条書きで書くこと)")
-    if not theme:
+    if not themes1:
         bad.append("### テーマ見出しが無い (台帳の再掲でなくテーマで整理する)")
     for r in body_facts:
-        hit = [b for c, b in items2 if r["id"] in c]
-        if len(hit) != 1:
-            bad.append(f"{r['id']}: §2 の項目が {len(hit)} 個 (1 個であること)")
+        hit = [b for b in blocks1 if r["id"] in cids(b)]
+        if not hit:
+            bad.append(f"{r['id']}: §1 に出てこない (裏取り済み fact は本文へ)")
             continue
-        if text_key(r.get("restated")) not in text_key(hit[0]):
-            bad.append(f"{r['id']}: 項目本文が restated と一致しない")
-    for c, _ in items2:
-        for cid in c:
-            if cid not in byid:
-                bad.append(f"{cid}:台帳に無い")
-            elif byid[cid].get("kind") != "fact" or byid[cid].get("status") not in BODY_STATUS:
-                bad.append(f"{cid}:§2 に置けない区分/判定")
-    marks = [m for m in OPINION_MARKERS if m in s2]
-    g("G10 §2 はテーマ配下に裏取り済み fact が 1 項目ずつ・restated 逐語・私見表現なし",
+        if not any(text_key(r.get("restated")) in text_key(b) for b in hit):
+            bad.append(f"{r['id']}: 近傍の本文が restated を逐語で含まない")
+    # 1 段落 / 1 行に CID を詰め込んで「台帳を 1 ブロックにベタ貼り」する迂回を塞ぐ。
+    # 複数 CID を置くなら、その記述はそこに置いた**全部**の restated を含んでいること。
+    for b in blocks1:
+        bc = cids(b)
+        if len(bc) > CIDS_PER_BLOCK_MAX:
+            bad.append(f"1 つの記述に CID が {len(bc)} 個 "
+                       f"({CIDS_PER_BLOCK_MAX} 個まで。分けて書く): {b[:24]}")
+            continue
+        for cid in bc:
+            r = byid.get(cid)
+            if r and r.get("kind") == "fact" and r.get("status") in BODY_STATUS \
+                    and text_key(r.get("restated")) not in text_key(b):
+                bad.append(f"{cid}: 同じ記述に置いた他 CID の restated が無い "
+                           f"(ID だけ並べている): {b[:24]}")
+    for cid in cids(s1):
+        if cid not in byid:
+            bad.append(f"{cid}:台帳に無い")
+        elif byid[cid].get("kind") != "fact" or byid[cid].get("status") not in BODY_STATUS:
+            bad.append(f"{cid}:§1 に置けない区分/判定 (私見は §2、未確認は 付録A)")
+    marks = [m for m in OPINION_MARKERS if m in s1]
+    g("G10 §1 事実編はテーマ配下・裏取り済み fact 全件・restated 逐語・私見表現なし",
       not bad and not marks, f"{bad[:6]} markers={marks}")
 
-    # --- G11 §3 私見の切り分け ----------------------------------------------
-    s3 = strip_noise(secs.get(3, ""))
+    # --- G11 付録B (§5) 私見の切り分け --------------------------------------
+    s3 = strip_noise(secs.get(5, ""))
     bad = []
     seen3: dict[str, list[str]] = {}
     sig3: dict[str, str] = {}
@@ -527,11 +600,11 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
     op = {r["id"] for r in rows if r.get("kind") == "opinion"}
     miss = sorted(op - set(seen3), key=lambda x: int(x[1:]))
     extra = sorted(set(seen3) - op, key=lambda x: int(x[1:]))
-    g("G11 §3 に opinion 全件、1 行 1 件、必須列が実質的に埋まる",
+    g("G11 付録B に opinion 全件、1 行 1 件、必須列が実質的に埋まる",
       not bad and not miss and not extra, f"{bad[:6]} 欠落={miss[:6]} 余分={extra[:6]}")
 
-    # --- G12 §5 未確認の明示 ------------------------------------------------
-    s5 = strip_noise(secs.get(5, ""))
+    # --- G12 付録A (§4) 未確認の明示 ----------------------------------------
+    s5 = strip_noise(secs.get(4, ""))
     bad = []
     seen5: set[str] = set()
     for row in table_rows(s5):
@@ -553,11 +626,11 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
     unv = {r["id"] for r in rows if r.get("status") == "UNVERIFIED"}
     miss = sorted(unv - seen5, key=lambda x: int(x[1:]))
     extra5 = sorted(seen5 - unv, key=lambda x: int(x[1:]))
-    g("G12 §5 に UNVERIFIED 全件のみ、探した範囲が台帳 searched と対応",
+    g("G12 付録A に UNVERIFIED 全件のみ、探した範囲が台帳 searched と対応",
       not bad and not miss and not extra5, f"{bad[:6]} 欠落={miss[:6]} 余分={extra5[:6]}")
 
-    # --- G13 §4 考察の実体 --------------------------------------------------
-    s4 = strip_noise(secs.get(4, ""))
+    # --- G13 §2 考察の実体 --------------------------------------------------
+    s4 = strip_noise(secs.get(2, ""))
     items = re.split(r"^###\s+", s4, flags=re.M)[1:]
     bad = []
     heads: list[str] = []
@@ -568,7 +641,7 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
         head = it.split("\n", 1)[0].strip()
         heads.append(head)
         f_ev = re.search(r"^\s*[-*]\s*根拠:\s*(.+)$", it, re.M)
-        f_im = re.search(r"^\s*[-*]\s*示唆:\s*(.+)$", it, re.M)
+        f_im = re.search(r"^\s*[-*]\s*(?:示唆|結論):\s*(.+)$", it, re.M)
         f_ac = re.search(r"^\s*[-*]\s*アクション:\s*(.+)$", it, re.M)
         if not f_ev or not cids(f_ev.group(1)):
             bad.append(f"{head}: 根拠 [C#] が無い")
@@ -577,7 +650,7 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
             if outside:
                 bad.append(f"{head}: 根拠が裏取り済み fact でない {outside}")
         if not f_im or len(key_of(f_im.group(1))) < 30:
-            bad.append(f"{head}: 示唆が無い/薄い (30 字以上)")
+            bad.append(f"{head}: 示唆/結論が無い/薄い (30 字以上)")
         if not f_ac:
             bad.append(f"{head}: アクション行なし")
         else:
@@ -598,8 +671,8 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
     # 日本語は空白で切れないので、漢字/カナ/英字の連続を語として拾う
     tokens = [t for t in re.findall(r"[一-龥]{2,}|[ァ-ヶー]{2,}|[A-Za-z]{3,}", stance)]
     if items and tokens and not any(t in s4 for t in tokens):
-        bad.append("§4 が stance.md の語 (役割・所属・読み手) に一切触れていない")
-    g("G13 §4 考察は 根拠(裏取り済み fact)+示唆+アクション(担当/内容/ISO 期限)、立場に紐づく",
+        bad.append("§2 が stance.md の語 (役割・所属・読み手) に一切触れていない")
+    g("G13 §2 考察は 根拠(裏取り済み fact)+示唆/結論+アクション(担当/内容/ISO 期限)、立場に紐づく",
       not bad, f"{bad[:6]}")
 
     # --- G14 placeholder / 件数の手書き -------------------------------------
@@ -614,7 +687,7 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
             allowed.update(text_key(c) for c in COUNT_RE.findall(s))
     hand = [c for n, body in secs.items() if n not in GEN_FILES
             for c in COUNT_RE.findall(strip_noise(body)) if text_key(c) not in allowed]
-    g("G14b 件数の手書き禁止 (§2〜§5 の件数表現は台帳/引用に出るものだけ)", not hand, f"{hand[:8]}")
+    g("G14b 件数の手書き禁止 (本文・付録A/B の件数表現は台帳/引用に出るものだけ)", not hand, f"{hand[:8]}")
 
     # --- G15 反証レビュー記録 -----------------------------------------------
     rv = load_json(work / "review.json", required=False)
@@ -641,7 +714,7 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
         for h in heads:
             e = st_rv.get(h)
             if not isinstance(e, dict) or e.get("specific") is not True:
-                bad.append(f"§4「{h}」:立場固有性のレビュー記録なし")
+                bad.append(f"§2「{h}」:立場固有性のレビュー記録なし")
         notes = [str(e.get("note", "")) for e in
                  list(facts_rv.values()) + list(kinds_rv.values()) + list(st_rv.values())
                  if isinstance(e, dict)]
@@ -649,6 +722,52 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
         if keys and len(set(keys)) < len(keys):
             bad.append("レビュー note が複製されている (レビューしていない疑い)")
     g("G15 別モデルの反証レビュー記録 (work/review.json) が全対象を覆う", not bad, f"{bad[:6]}")
+
+    # --- G16 本文が散文主体 --------------------------------------------------
+    # 台帳・チャンクの表を本文の前面に出さないための歯止め。表は「並べた方が読める
+    # 情報」(拠点一覧・数字の層分け等) に限り、本文の主役は地の文であること。
+    # 判定はすべて**地の文の文字数**で行う (行数で測ると短い行を量産して比率を作れる)。
+    bad = []
+    prose0 = sum(len(text_key(x)) for x in prose_paragraphs(secs.get(0, "")))
+    if prose0 < SEC0_PROSE_MIN:
+        bad.append(f"§0 はじめに の地の文が薄い ({prose0} 字 / {SEC0_PROSE_MIN} 字以上)")
+    p1, l1, t1 = char_kinds(secs.get(1, ""))
+    need1 = min(SEC1_PROSE_CAP, SEC1_PROSE_BASE + SEC1_PROSE_PER_FACT * len(body_facts))
+    if p1 < need1:
+        bad.append(f"§1 全体の地の文が薄い ({p1} 字 / {need1} 字以上"
+                   f"= 80 + 40×fact {len(body_facts)} 件。箇条書き・表だけの羅列にしない)")
+    if t1 and t1 > (p1 + l1 + t1) * 0.5:
+        bad.append(f"§1 が表主体 (表 {t1} 字 / 地の文+箇条書き+表 {p1 + l1 + t1} 字)")
+    for th in themes1:
+        head = th.split("\n", 1)[0].strip()
+        pt = sum(len(text_key(x)) for x in prose_paragraphs(th))
+        if pt < THEME_PROSE_MIN:
+            bad.append(f"§1「{head}」の地の文が {pt} 字 ({THEME_PROSE_MIN} 字以上。"
+                       "表・箇条書きの前後に文脈を書く)")
+    for it in items:      # §2 の ### 項目 (G13 で拾ったもの)
+        head = it.split("\n", 1)[0].strip()
+        pi, li, ti = char_kinds(it)
+        # §2 は「観察/解釈/留保/結論」のラベル付き箇条書きでもよい (中身があればよい)。
+        # 排除したいのは**表で埋める**こと。
+        if pi + li < ITEM_MIN:
+            bad.append(f"§2「{head}」が薄い ({pi + li} 字 / {ITEM_MIN} 字以上)")
+        if ti and ti > (pi + li + ti) * 0.3:
+            bad.append(f"§2「{head}」が表主体 (表 {ti} 字 / 全 {pi + li + ti} 字)")
+    p3, l3, t3 = char_kinds(secs.get(3, ""))
+    if p3 + l3 < SEC3_MIN:
+        bad.append(f"§3 まとめ が薄い ({p3 + l3} 字 / {SEC3_MIN} 字以上)")
+    if p3 < SEC3_PROSE_MIN:
+        bad.append(f"§3 まとめ に地の文が {p3} 字 ({SEC3_PROSE_MIN} 字以上。"
+                   "箇条書きの前に総括の一段落を置く)")
+    pb = lb = tb = 0
+    for n in BODY_SECTIONS:
+        a, b_, c = char_kinds(secs.get(n, ""))
+        pb, lb, tb = pb + a, lb + b_, tb + c
+    total = pb + lb + tb
+    if total and tb > total * 0.4:
+        bad.append(f"本文の {tb * 100 // total}% が表 (40% 超で FAIL。台帳・一覧は付録へ)")
+    g("G16 本文 (§0〜§3) が散文主体 (表は補助・各節に地の文がある)", not bad,
+      f"{bad[:8]}" + (f" ほか {len(bad) - 8} 件" if len(bad) > 8 else ""))
 
     print()
     if fails:

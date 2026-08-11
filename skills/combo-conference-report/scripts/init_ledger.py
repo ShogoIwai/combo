@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """init_ledger.py — カンファレンス参加メモを決定的に「主張(claim)単位」へ切り出し、
-裏取り台帳の骨格と §0(入力一覧) を起こす。
+裏取り台帳の骨格と 付録C(§6 入力一覧) を起こす。
 
 分類(事実/私見)も裏取りも、ここではしない。ここでやるのは
   * 入力の読み込みと正規化
   * claim への一意 ID 付与 (C1..Cn) — 以後の引用キー
   * 台帳骨格 work/ledger.json (全 claim ぶんの未裁定行)
-  * work/section0.md (入力一覧・件数。件数を人が書かないための機械生成物)
+  * work/section0.md (付録C 入力一覧・件数。件数を人が書かないための機械生成物)
 だけ。判断は LLM、集計と網羅は決定的スクリプト、という分担を崩さない。
 
 セグメンテーションは check_report.py の G0 で**入力から再現・照合**される。
@@ -40,7 +40,7 @@ LEDGER_FIELDS = {
     "kind": "",              # fact | opinion
     "kind_rationale": "",    # なぜその kind か (行ごとに固有の文)
     "status": "",            # fact のみ: CONFIRMED|CORRECTED|PARTIAL|PRIVATE_PRIMARY|UNVERIFIED
-    "restated": "",          # 裏取り後の事実としての言い直し (fact のみ / §2 本文はこれと逐語一致)
+    "restated": "",          # 裏取り後の事実としての言い直し (fact のみ / §1 事実編の本文はこれと逐語一致)
     "status_rationale": "",  # なぜその status か (行ごとに固有の文)
     "searched": {},          # UNVERIFIED のみ: {"queries": [...], "domains": [...]}
     "sources": [],           # 公開出典: [{"title","url","publisher","date","accessed","quote"}]
@@ -200,7 +200,7 @@ def main() -> None:
     ap.add_argument("notes", nargs="+", help="参加メモ (txt/md)。並べた順が N1..Nn")
     ap.add_argument("--stance", required=True, help="自分の立場を書いたファイル (txt/md)")
     ap.add_argument("--work", required=True)
-    ap.add_argument("--conference", default="", help="カンファレンス名 (§0 に出す)")
+    ap.add_argument("--conference", default="", help="カンファレンス名 (付録C §6 に出す)")
     args = ap.parse_args()
 
     work = pathlib.Path(args.work)
@@ -220,7 +220,7 @@ def main() -> None:
     stance_raw = stance_p.read_bytes()
     stance = norm(stance_raw.decode("utf-8"))
     if not stance.strip():
-        die(f"stance file is empty: {stance_p} — 立場が空だと §4 の考察が誰宛か決まらない")
+        die(f"stance file is empty: {stance_p} — 立場が空だと §2 の考察が誰宛か決まらない")
 
     paths = [pathlib.Path(n) for n in args.notes]
     docs, claims = build_claims(paths)
@@ -243,7 +243,7 @@ def main() -> None:
     )
     (work / "stance.md").write_text(stance + "\n", encoding="utf-8")
 
-    lines = ["## 0. 入力と作成条件", ""]
+    lines = ["## 6. 付録C. 入力と作成条件", ""]
     if args.conference:
         lines.append(f"- 対象カンファレンス: {args.conference}")
     lines += [
