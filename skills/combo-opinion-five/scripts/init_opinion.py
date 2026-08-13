@@ -64,6 +64,30 @@ LEDGER_FIELDS = {
 }
 
 
+ANCHOR_HEADING = "検査用アンカー"
+
+
+def stance_anchors(stance: str) -> list[str]:
+    """立場ファイルの `## 検査用アンカー` 配下の箇条書きを返す。
+
+    ここを本文の自動抽出にすると「自分」「判断」「ファイル」のような一般語まで
+    拾ってしまい、V(価値基準) と E(表明) が立場固有かの検査が空回りする。
+    逆にひらがな中心の立場ファイルでは語が 1 つも取れず到達不能になる。
+    だから**明示列挙**にして、init の時点で 2 件以上あることを保証する。
+    """
+    out: list[str] = []
+    on = False
+    for line in stance.split("\n"):
+        if re.match(r"^\s*#{1,6}\s", line):
+            on = ANCHOR_HEADING in line
+            continue
+        if on and BULLET_RE.match(line):
+            v = BULLET_RE.sub("", line).strip().strip("`*_ ")
+            if len(v) >= 2 and v not in out:
+                out.append(v)
+    return out
+
+
 def die(msg: str) -> None:
     print(f"Error: {msg}", file=sys.stderr)
     sys.exit(1)
@@ -236,6 +260,12 @@ def main() -> None:
     stance = norm(stance_raw.decode("utf-8"))
     if not stance.strip():
         die(f"stance file is empty: {stance_p} — 立場が空だと V(価値基準) の由来が書けない")
+    anchors = stance_anchors(stance)
+    if len(anchors) < 2:
+        die(f"{stance_p} に `## {ANCHOR_HEADING}` 配下の箇条書きが 2 件未満 — "
+            "価値基準の由来と表明が『この立場に固有か』を検査できない。"
+            f"reference/stance_default.md の `## {ANCHOR_HEADING}` を見て、"
+            "自分の立場を指す語（例: ASIC ベンダー / 妻と子）を 2 件以上列挙すること")
 
     paths = [pathlib.Path(n) for n in args.inputs]
     docs, claims = build_claims(paths)
@@ -264,7 +294,7 @@ def main() -> None:
         lines.append(f"- お題: {args.topic}")
     lines += [
         f"- 入力テキスト: {len(docs)} 件 / 抽出 claim: {len(claims)} 件",
-        f"- 立場ファイル: `{stance_p}`",
+        f"- 立場ファイル: `{stance_p}`（検査用アンカー: {' / '.join(anchors)}）",
         "",
         "| ID | ファイル | 文字量(byte) | claim 数 | sha256(raw, 先頭16) |",
         "| -- | -------- | ------------ | -------- | ------------------- |",

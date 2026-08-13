@@ -5,7 +5,7 @@
 subcommands:
   report  work/ledger.json から 付録D(裁定台帳) と 付録E(出典一覧) を機械生成する。
           **件数はここでしか作らない。**
-  check   出力 md と work/ を 17 ゲートで検査する。exit 0 = 全 PASS。
+  check   出力 md と work/ を 19 ゲートで検査する。exit 0 = 全 PASS。
           exit 1 = FAIL あり。exit 2 = 入力不備 (検査できない)。
 
 usage:
@@ -16,6 +16,7 @@ usage:
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import hashlib
 import json
 import pathlib
@@ -24,19 +25,39 @@ import sys
 import unicodedata
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from init_opinion import build_claims, norm  # noqa: E402
+from init_opinion import build_claims, norm, stance_anchors  # noqa: E402
 
 CID_RE = re.compile(r"\[(C\d+)\]")
+BARE_CID_RE = re.compile(r"\bC\d+\b")
 TABLE_RE = re.compile(r"^\s*\|")
 TABLE_SEP_RE = re.compile(r"^\s*\|?[\s:|-]+\|[\s:|-]*$")
-FENCE_RE = re.compile(r"^\s*(```|~~~)")
+FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 BULLET_RE = re.compile(r"^\s*(?:[-*+]\s+|\d{1,2}[.)]\s+)")
 COUNT_RE = re.compile(r"(\d+)\s*件")
-PLACEHOLDER_RE = re.compile(r"〈[^〉]*〉|<[^<>\n]{1,60}>|TODO|FIXME|TBD")
-TOKEN_RE = re.compile(r"[一-龥ァ-ヶー]{2,}|[A-Za-z][A-Za-z0-9_-]{2,}")
+# 雛形の取りこぼしを見る。ASCII の <…> は HTML タグ / autolink と紛れるので、
+# 〈…〉 と既知の placeholder 語だけを対象にする (誤検出で散文を壊さない)。
+PLACEHOLDER_RE = re.compile(r"〈[^〉]*〉|TODO|FIXME|TBD|\bXXX\b")
+HTML_TAGISH_RE = re.compile(r"^(?:/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]*)?/?|!--.*|https?://[^<>\s]+)$")
 OPINION_WORDS = ("と思う", "と思われ", "だろう", "べきだ", "べきである", "べきだろ",
                  "気がする", "感じる", "感じた", "印象", "期待したい", "かもしれない",
                  "望ましい", "残念", "面白い", "ではないか")
+
+# --- 逆分類の警戒シグナル (G18) --------------------------------------------
+# 「これに当たったら分類禁止」ではなく「厚い説明責任を課す」ためのシグナル。
+# 誤検出しても書けなくならないよう、罰は kind_rationale の字数だけにしてある。
+FACTLIKE_RES = (
+    re.compile(r"\d"),                                   # 数量・年・比率
+    re.compile(r"[%％]|円|ドル|nm|GHz|MHz|TOPS|GB|TB|Gbps|W\b", re.I),
+    re.compile(r"発表|公開|開始|終了|提供|発売|採用|搭載|対応|買収|提携|施行|成立|"
+               r"出荷|量産|認定|受注|決定|導入|義務|禁止"),
+    re.compile(r"によると|によれば|と述べ|と発表|と報じ|とされて"),
+    re.compile(r"https?://"),
+)
+NORMATIVE_RES = (
+    re.compile(r"べきだ|べきである|べきではない|すべき|望ましい|価値がある|大事だ|重要だ|"
+               r"優先|許せない|受け入れられない|嫌だ|したくない|したい|好ましい|正しい|"
+               r"間違っている|べく"),
+)
 
 VERIFIED = ("CONFIRMED", "CORRECTED", "PARTIAL", "PRIVATE_PRIMARY")
 STATUSES = VERIFIED + ("UNVERIFIED",)
@@ -69,7 +90,7 @@ def gate(name: str, problems: list[str]) -> None:
 
 def squash(s: str) -> str:
     """全角半角と空白をつぶした比較用の文字列。"""
-    s = unicodedata.normalize("NFKC", s)
+    s = unicodedata.normalize("NFKC", str(s))
     return re.sub(r"\s+", "", s)
 
 
@@ -78,14 +99,69 @@ def strip_ids_digits(s: str) -> str:
 
 
 # ------------------------------------------------------------------ md parsing
+def scan_fence(lines: list[str]) -> list[bool]:
+    """各行が fenced code block の内側かを返す。
+
+    開始記号の**種類と長さ**を記憶し、同種で同じ長さ以上の閉じ記号だけで閉じる。
+    (``` を ~~~ で閉じられると、以降の見出しを検査対象外に隠せてしまう)
+    """
+    out: list[bool] = []
+    mark: str | None = None
+    for line in lines:
+        m = FENCE_RE.match(line)
+        if mark is None:
+            if m:
+                mark = m.group(1)
+                out.append(True)
+            else:
+                out.append(False)
+            continue
+        out.append(True)
+        if m and m.group(1)[0] == mark[0] and len(m.group(1)) >= len(mark) \
+                and not m.group(2).strip():
+            mark = None
+    return out
+
+
+def strip_comments(md: str) -> str:
+    """fence の**外側**の HTML コメントだけを落とす (書き方メモは本文ではない)。"""
+    lines = md.split("\n")
+    inside = scan_fence(lines)
+    out: list[str] = []
+    in_comment = False
+    for line, fenced in zip(lines, inside):
+        if fenced:
+            out.append(line)
+            continue
+        buf = ""
+        rest = line
+        while rest:
+            if in_comment:
+                i = rest.find("-->")
+                if i < 0:
+                    rest = ""
+                    break
+                rest = rest[i + 3:]
+                in_comment = False
+            else:
+                i = rest.find("<!--")
+                if i < 0:
+                    buf += rest
+                    break
+                buf += rest[:i]
+                rest = rest[i + 4:]
+                in_comment = True
+        out.append(buf)
+    return "\n".join(out)
+
+
 def split_sections(md: str) -> list[dict]:
     """`## N. Title` 単位に切る。fenced code の中の # は見出しにしない。"""
+    lines = md.split("\n")
+    inside = scan_fence(lines)
     secs: list[dict] = []
-    fence = False
-    for line in md.split("\n"):
-        if FENCE_RE.match(line):
-            fence = not fence
-        if not fence:
+    for line, fenced in zip(lines, inside):
+        if not fenced:
             m = re.match(r"^##\s+(\d+)\.\s*(.+?)\s*$", line)
             if m:
                 secs.append({"num": int(m.group(1)), "title": m.group(2), "lines": []})
@@ -98,16 +174,13 @@ def split_sections(md: str) -> list[dict]:
 def subsections(lines: list[str]) -> list[dict]:
     """`### ` 単位に切る (見出し前の導入は title="" の 1 件目)。"""
     out = [{"title": "", "lines": []}]
-    fence = False
-    for line in lines:
-        if FENCE_RE.match(line):
-            fence = not fence
-        if not fence and line.startswith("### "):
+    for line, fenced in zip(lines, scan_fence(lines)):
+        if not fenced and line.startswith("### "):
             out.append({"title": line[4:].strip(), "lines": []})
             continue
         out[-1]["lines"].append(line)
-    if not out[0]["lines"] or not "".join(out[0]["lines"]).strip():
-        out = out[1:] if len(out) > 1 else out
+    if not "".join(out[0]["lines"]).strip() and len(out) > 1:
+        out = out[1:]
     return out
 
 
@@ -115,15 +188,11 @@ def units(lines: list[str]) -> list[str]:
     """本文の「1 記述」= 段落 / 箇条書き 1 行 / 表 1 行。"""
     out: list[str] = []
     para: list[str] = []
-    fence = False
-    for line in lines:
-        if FENCE_RE.match(line):
-            fence = not fence
-            continue
-        if fence:
+    for line, fenced in zip(lines, scan_fence(lines)):
+        if fenced:
             continue
         s = line.strip()
-        if not s or s.startswith("<!--") or s.startswith("#"):
+        if not s or s.startswith("#"):
             if para:
                 out.append(" ".join(para))
                 para = []
@@ -150,13 +219,9 @@ def units(lines: list[str]) -> list[str]:
 def body_text(lines: list[str], prose_only: bool = False, no_table: bool = True) -> str:
     """文字数判定用のテキスト。prose_only なら箇条書き・表を除いた地の文だけ。"""
     keep: list[str] = []
-    fence = False
-    for line in lines:
-        if FENCE_RE.match(line):
-            fence = not fence
-            continue
+    for line, fenced in zip(lines, scan_fence(lines)):
         s = line.strip()
-        if fence or not s or s.startswith("<!--") or s.startswith("#"):
+        if fenced or not s or s.startswith("#"):
             continue
         if TABLE_RE.match(s):
             if no_table:
@@ -171,8 +236,8 @@ def body_text(lines: list[str], prose_only: bool = False, no_table: bool = True)
 
 def table_ratio(lines: list[str]) -> float:
     total = len(body_text(lines, no_table=False))
-    tbl = sum(len(squash(l)) for l in lines
-              if TABLE_RE.match(l.strip()) and not TABLE_SEP_RE.match(l.strip()))
+    tbl = sum(len(squash(l)) for l, f in zip(lines, scan_fence(lines))
+              if not f and TABLE_RE.match(l.strip()) and not TABLE_SEP_RE.match(l.strip()))
     return (tbl / total) if total else 0.0
 
 
@@ -186,13 +251,29 @@ def labelled(lines: list[str], label: str) -> list[str]:
     return out
 
 
-def stance_tokens(stance: str) -> list[str]:
-    toks = [t for t in TOKEN_RE.findall(unicodedata.normalize("NFKC", stance)) if len(t) >= 2]
-    seen: list[str] = []
-    for t in toks:
-        if t not in seen:
-            seen.append(t)
-    return seen
+def item_cids(x: dict) -> list[str]:
+    """`###` 項目が担当する CID (見出しに置いた `[C#]`)。"""
+    return CID_RE.findall(x["title"])
+
+
+def valid_date(s: str) -> bool:
+    """YYYY / YYYY-MM / YYYY-MM-DD を実在日として検査する。"""
+    if not re.match(r"^\d{4}(-\d{2}){0,2}$", s):
+        return False
+    parts = [int(x) for x in s.split("-")]
+    y = parts[0]
+    if not (1900 <= y <= _dt.date.today().year + 1):
+        return False
+    try:
+        _dt.date(y, parts[1] if len(parts) > 1 else 1, parts[2] if len(parts) > 2 else 1)
+    except ValueError:
+        return False
+    return True
+
+
+def matches(res, *texts: str) -> bool:
+    t = " ".join(str(x) for x in texts)
+    return any(r.search(t) for r in res)
 
 
 # ------------------------------------------------------------------ generation
@@ -213,10 +294,10 @@ def gen_ledger_table(rows: list[dict]) -> str:
             main, why = r.get("restated", ""), r.get("status_rationale", "")
         elif kind == "interpretation":
             main = r.get("interpretation", "")
-            why = "他の見方: " + r.get("alternative", "")
+            why = "他の見方: " + str(r.get("alternative", ""))
         else:
             main = r.get("axis", "")
-            why = "由来: " + r.get("origin", "")
+            why = "由来: " + str(r.get("origin", ""))
         cell = lambda s: str(s).replace("|", "\\|").replace("\n", " ")  # noqa: E731
         out.append(f"| {r['id']} | {cell(r['text'])} | {kind} | {r.get('status','-') or '-'} "
                    f"| {cell(main)} | {cell(why)} |")
@@ -226,8 +307,8 @@ def gen_ledger_table(rows: list[dict]) -> str:
 
 def gen_sources(rows: list[dict], ev: dict) -> str:
     out = ["## 9. 付録E. 出典一覧", ""]
-    pub = [(r, s) for r in rows for s in (r.get("sources") or [])]
-    priv = [(r, s) for r in rows for s in (r.get("private_sources") or [])]
+    pub = [(r, s) for r in rows for s in (r.get("sources") or []) if isinstance(s, dict)]
+    priv = [(r, s) for r in rows for s in (r.get("private_sources") or []) if isinstance(s, dict)]
     out += [f"- 公開出典: {len(pub)} 件 / 非公開の一次資料: {len(priv)} 件", "",
             "| ID | 出典 | 発行元 | 公開日 | 参照日 | 取得 | URL |",
             "| -- | ---- | ------ | ------ | ------ | ---- | --- |"]
@@ -247,6 +328,22 @@ def gen_sources(rows: list[dict], ev: dict) -> str:
     return "\n".join(out) + "\n"
 
 
+def load_rows(work: pathlib.Path) -> list[dict]:
+    p = work / "ledger.json"
+    if not p.is_file():
+        die(f"{p} not found — init_opinion.py を先に回すこと")
+    try:
+        rows = json.loads(p.read_text(encoding="utf-8"))["rows"]
+    except Exception as e:
+        die(f"ledger.json を読めない: {e}")
+    if not isinstance(rows, list) or not rows:
+        die("ledger.json の rows がリストでない/空")
+    for r in rows:
+        if not isinstance(r, dict) or not isinstance(r.get("id"), str):
+            die("ledger.json の行が dict でない、または id が無い")
+    return rows
+
+
 def cmd_report(work: pathlib.Path) -> None:
     rows = load_rows(work)
     ev_p = work / "evidence.json"
@@ -256,26 +353,49 @@ def cmd_report(work: pathlib.Path) -> None:
     print(f"OK: {work/'ledger_table.md'}\n    {work/'sources.md'}")
 
 
-def load_rows(work: pathlib.Path) -> list[dict]:
-    p = work / "ledger.json"
-    if not p.is_file():
-        die(f"{p} not found — init_opinion.py を先に回すこと")
-    try:
-        rows = json.loads(p.read_text(encoding="utf-8"))["rows"]
-    except Exception as e:
-        die(f"ledger.json を読めない: {e}")
-    if not rows:
-        die("ledger.json に行が無い")
-    return rows
-
-
 # ---------------------------------------------------------------------- checks
+def check_types(rows: list[dict]) -> list[str]:
+    """複合フィールドの型を先に固定する。
+
+    型が想定外だと checker 自体が traceback で落ちる = FAIL ですらなくなるので、
+    ここで問題として拾う。
+    """
+    p: list[str] = []
+    for r in rows:
+        cid = r["id"]
+        for f in ("kind", "kind_rationale", "status", "restated", "status_rationale",
+                  "interpretation", "alternative", "axis", "origin", "tradeoff",
+                  "text", "context"):
+            if not isinstance(r.get(f, ""), str):
+                p.append(f"{cid}: {f} が文字列でない ({type(r.get(f)).__name__})")
+        for f in ("sources", "private_sources", "basis"):
+            v = r.get(f, [])
+            if not isinstance(v, list):
+                p.append(f"{cid}: {f} がリストでない ({type(v).__name__})")
+                continue
+            for e in v:
+                if f == "basis":
+                    if not isinstance(e, str):
+                        p.append(f"{cid}: basis の要素が文字列でない")
+                elif not isinstance(e, dict):
+                    p.append(f"{cid}: {f} の要素が dict でない")
+        sr = r.get("searched", {})
+        if not isinstance(sr, dict):
+            p.append(f"{cid}: searched が dict でない ({type(sr).__name__})")
+        else:
+            for f in ("queries", "domains"):
+                v = sr.get(f, [])
+                if v and (not isinstance(v, list) or not all(isinstance(x, str) for x in v)):
+                    p.append(f"{cid}: searched.{f} が文字列リストでない")
+    return p
+
+
 def cmd_check(report: pathlib.Path, work: pathlib.Path,
               inputs: list[str], stance_arg: str) -> int:
     if not report.is_file():
         die(f"report not found: {report}")
     # HTML コメント (雛形の書き方メモ) は本文ではないので落としてから見る
-    md = re.sub(r"(?s)<!--.*?-->", "", norm(report.read_text(encoding="utf-8")))
+    md = strip_comments(norm(report.read_text(encoding="utf-8")))
     rows = load_rows(work)
     mani_p = work / "manifest.json"
     if not mani_p.is_file():
@@ -286,12 +406,24 @@ def cmd_check(report: pathlib.Path, work: pathlib.Path,
         die(f"{claims_p} not found")
     claims_obj = json.loads(claims_p.read_text(encoding="utf-8"))
 
+    type_problems = check_types(rows)
+    if type_problems:
+        # 型が壊れたまま先へ進むと traceback で検査そのものが死ぬ。ここで打ち切る。
+        gate("G1 台帳の型と網羅", type_problems)
+        for name, ok, probs in results:
+            print(f"[{'PASS' if ok else 'FAIL'}] {name}")
+            for x in probs[:20]:
+                print(f"       - {x}")
+        print("\nFAIL: 台帳の型が壊れているため以降のゲートを実行できない")
+        return 1
+
     by_id = {r["id"]: r for r in rows}
     facts = [r for r in rows if r.get("kind") == "fact"]
     verified = [r for r in facts if r.get("status") in VERIFIED]
     unver = [r for r in facts if r.get("status") == "UNVERIFIED"]
     interps = [r for r in rows if r.get("kind") == "interpretation"]
     values = [r for r in rows if r.get("kind") == "value"]
+    vids = {r["id"] for r in verified}
 
     secs = split_sections(md)
     sec = {s["num"]: s for s in secs}
@@ -299,28 +431,35 @@ def cmd_check(report: pathlib.Path, work: pathlib.Path,
 
     # --- G0 入力不変性 -----------------------------------------------------
     p: list[str] = []
-    paths = [pathlib.Path(x) for x in (inputs or mani.get("inputs", []))]
-    try:
-        docs2, claims2 = build_claims(paths)
-    except SystemExit:
-        docs2, claims2 = [], []
-        p.append("入力テキストを再セグメントできない（パスが manifest と食い違う／消えている）")
+    declared = inputs or mani.get("inputs", [])
+    if not declared:
+        p.append("入力パスが 1 つも無い（manifest の inputs が空 — 照合を空振りさせる改変）")
+    paths = [pathlib.Path(x) for x in declared]
+    docs2: list[dict] = []
+    claims2: list[dict] = []
+    if paths:
+        try:
+            docs2, claims2 = build_claims(paths)
+        except SystemExit:
+            p.append("入力テキストを再セグメントできない（パスが manifest と食い違う／消えている）")
     if claims2:
         obj2 = {"docs": docs2, "claims": claims2}
         sha2 = hashlib.sha256(
             json.dumps(obj2, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
         if sha2 != mani.get("claims_sha256"):
             p.append("claims_sha256 不一致 — 入力または claims.json が後から書き換えられている")
-        if claims_obj.get("claims") != claims2:
-            p.append("claims.json が入力からの再現結果と一致しない")
-        idx = {c["id"]: c for c in claims2}
-        if set(idx) != set(by_id):
-            p.append(f"台帳の claim 集合が入力と違う（台帳 {len(by_id)} / 再現 {len(idx)}）")
-        for cid, c in idx.items():
-            r = by_id.get(cid)
-            if r and (r.get("text") != c["text"] or r.get("context") != c["context"]
-                      or r.get("doc") != c["doc"]):
-                p.append(f"{cid}: 台帳の text/context/doc が入力と一致しない")
+        if claims_obj != obj2:
+            p.append("claims.json が入力からの再現結果と一致しない（docs / claims の全項目照合）")
+        if mani.get("claims") != len(claims2) or mani.get("docs") != len(docs2):
+            p.append("manifest の件数が再現結果と一致しない")
+        # ledger は claims と**同じ順序**で 1 対 1 に並んでいること
+        if [r["id"] for r in rows] != [c["id"] for c in claims2]:
+            p.append(f"台帳の行と順序が入力と違う（台帳 {len(rows)} / 再現 {len(claims2)}）")
+        else:
+            for r, c in zip(rows, claims2):
+                if (r.get("text") != c["text"] or r.get("context") != c["context"]
+                        or r.get("doc") != c["doc"]):
+                    p.append(f"{r['id']}: 台帳の text/context/doc が入力と一致しない")
     stance_p = pathlib.Path(stance_arg) if stance_arg else pathlib.Path(mani.get("stance", ""))
     if stance_p.is_file():
         if hashlib.sha256(stance_p.read_bytes()).hexdigest() != mani.get("stance_raw_sha256"):
@@ -340,7 +479,7 @@ def cmd_check(report: pathlib.Path, work: pathlib.Path,
         p.append("台帳に ID の重複がある")
     if len(rows) != mani.get("claims"):
         p.append(f"台帳 {len(rows)} 行 ≠ manifest の claim 数 {mani.get('claims')}（行を消している）")
-    gate("G1 台帳網羅", p)
+    gate("G1 台帳の型と網羅", p)
 
     # --- G2 未裁定 0 -------------------------------------------------------
     p = []
@@ -387,16 +526,20 @@ def cmd_check(report: pathlib.Path, work: pathlib.Path,
         if st in ("CONFIRMED", "CORRECTED", "PARTIAL") and not srcs:
             p.append(f"{r['id']}: status={st} なのに公開出典が無い")
         for s in srcs:
-            url = (s or {}).get("url", "")
+            url = str(s.get("url", ""))
             miss = [f for f in ("title", "url", "publisher", "date", "accessed", "quote")
-                    if not str((s or {}).get(f, "")).strip()]
+                    if not str(s.get(f, "")).strip()]
             if miss:
                 p.append(f"{r['id']}: 出典の必須項目が空 {miss} ({url})")
                 continue
-            if not re.match(r"^\d{4}(-\d{2}){0,2}$", s["date"]):
-                p.append(f"{r['id']}: date が YYYY[-MM[-DD]] でない: {s['date']}")
-            if not re.match(r"^\d{4}-\d{2}-\d{2}$", s["accessed"]):
-                p.append(f"{r['id']}: accessed が YYYY-MM-DD でない: {s['accessed']}")
+            if not re.match(r"^https?://[^\s<>\"']+$", url):
+                p.append(f"{r['id']}: url が http(s) の絶対 URL でない: {url}")
+                continue
+            if not valid_date(str(s["date"])):
+                p.append(f"{r['id']}: date が実在する YYYY[-MM[-DD]] でない: {s['date']}")
+            if not (re.match(r"^\d{4}-\d{2}-\d{2}$", str(s["accessed"]))
+                    and valid_date(str(s["accessed"]))):
+                p.append(f"{r['id']}: accessed が実在する YYYY-MM-DD でない: {s['accessed']}")
             e = ev.get(url)
             if not e:
                 p.append(f"{r['id']}: 未取得の URL（fetch_sources.py を回すこと）: {url}")
@@ -404,9 +547,16 @@ def cmd_check(report: pathlib.Path, work: pathlib.Path,
             if e.get("status") != 200:
                 p.append(f"{r['id']}: 取得に失敗した URL を出典にしている [{e.get('status')}] {url}")
                 continue
+            for f in ("final_url", "fetched", "sha256"):
+                if not str(e.get(f, "")).strip():
+                    p.append(f"{r['id']}: evidence の {f} が空（取得記録として不完全）: {url}")
+            # 証跡ファイル名は URL から決まる (fetch_sources.py の命名)。
+            # ここを見ないと、別 URL の証跡を流用して未取得の URL を通せる。
+            want_name = f"{hashlib.sha256(url.encode('utf-8')).hexdigest()[:16]}.txt"
             name = str(e.get("text_file", ""))
-            if not name or "/" in name or ".." in name:
-                p.append(f"{r['id']}: 証跡ファイル名が不正: {name!r}")
+            if name != want_name:
+                p.append(f"{r['id']}: 証跡ファイル名が URL と対応しない"
+                         f"（期待 {want_name} / 実際 {name!r}）— 別 URL の証跡の流用")
                 continue
             f = ev_dir / name
             if not f.is_file():
@@ -431,7 +581,7 @@ def cmd_check(report: pathlib.Path, work: pathlib.Path,
                 p.append(f"{r['id']}: PRIVATE_PRIMARY なのに private_sources が空")
             for s in ps:
                 miss = [f for f in ("document", "page", "classification", "holder", "quote")
-                        if not str((s or {}).get(f, "")).strip()]
+                        if not str(s.get(f, "")).strip()]
                 if miss:
                     p.append(f"{r['id']}: private_sources の必須項目が空 {miss}")
             if r.get("sources"):
@@ -459,7 +609,6 @@ def cmd_check(report: pathlib.Path, work: pathlib.Path,
 
     # --- G7 解釈が事実に乗っているか --------------------------------------
     p = []
-    vids = {r["id"] for r in verified}
     for r in interps:
         b = r.get("basis") or []
         if not b:
@@ -473,11 +622,13 @@ def cmd_check(report: pathlib.Path, work: pathlib.Path,
 
     # --- G8 価値基準が立場に紐づくか --------------------------------------
     p = []
-    toks = stance_tokens(stance_text)
+    anchors = stance_anchors(stance_text)
+    if len(anchors) < 2:
+        p.append("立場ファイルの『検査用アンカー』が 2 件未満 — V と E が立場固有かを検査できない")
     for r in values:
         o = squash(r.get("origin", ""))
-        if not any(squash(t) in o for t in toks):
-            p.append(f"{r['id']}: origin が立場ファイルのどの語にも紐づかない（一般論の可能性）")
+        if anchors and not any(squash(a) in o for a in anchors):
+            p.append(f"{r['id']}: origin が立場のアンカー（{'/'.join(anchors[:3])}…）に紐づかない")
         if squash(r.get("tradeoff", "")) in o or not r.get("tradeoff"):
             p.append(f"{r['id']}: tradeoff が由来の言い換えで、捨てるものが書かれていない")
     if not values:
@@ -486,7 +637,6 @@ def cmd_check(report: pathlib.Path, work: pathlib.Path,
 
     # --- G9 章立てと生成物の逐語一致 --------------------------------------
     p = []
-    # 表題は NFKC 正規化して比べる（｜/（） と |/() の差は落とさない）
     got = [(s["num"], squash(s["title"])) for s in secs]
     want = [(n, squash(t)) for n, t in SECTIONS]
     if got != want:
@@ -499,8 +649,8 @@ def cmd_check(report: pathlib.Path, work: pathlib.Path,
         if not gp.is_file():
             p.append(f"{fn} が無い（report サブコマンドを回すこと）")
             continue
-        want = "\n".join(gp.read_text(encoding="utf-8").split("\n")[1:])
-        if squash(want) != squash("\n".join(body(num))):
+        wants = "\n".join(gp.read_text(encoding="utf-8").split("\n")[1:])
+        if squash(wants) != squash("\n".join(body(num))):
             p.append(f"§{num} が {fn} の逐語コピーでない（手で書き換えている）")
     gate("G9 章立て・生成物一致", p)
 
@@ -508,14 +658,7 @@ def cmd_check(report: pathlib.Path, work: pathlib.Path,
     p = []
     s1 = body(1)
     us = units(s1)
-    for r in verified:
-        cid = r["id"]
-        hit = [u for u in us if f"[{cid}]" in u]
-        if not hit:
-            p.append(f"{cid}: 裏取り済み fact が §1 本文に出ていない")
-            continue
-        if not any(squash(r["restated"]) in squash(u) for u in hit):
-            p.append(f"{cid}: [{cid}] を置いた記述に restated が逐語で入っていない")
+    placed: set[str] = set()
     for u in us:
         cids = CID_RE.findall(u)
         if len(cids) > 3:
@@ -524,8 +667,18 @@ def cmd_check(report: pathlib.Path, work: pathlib.Path,
             r = by_id.get(cid)
             if not r:
                 p.append(f"§1 に台帳外の CID: {cid}")
-            elif r.get("kind") != "fact" or r.get("status") not in VERIFIED:
+                continue
+            if r.get("kind") != "fact" or r.get("status") not in VERIFIED:
                 p.append(f"§1 に事実でない CID: {cid}（kind={r.get('kind')} status={r.get('status')}）")
+                continue
+            # その記述に置いた CID **全部**の restated が、その記述自身に入っていること
+            if squash(r["restated"]) not in squash(u):
+                p.append(f"§1: [{cid}] を置いた記述に {cid} の restated が入っていない: {u[:40]}…")
+            else:
+                placed.add(cid)
+    for r in verified:
+        if r["id"] not in placed:
+            p.append(f"{r['id']}: 裏取り済み fact が §1 本文に（restated 逐語で）出ていない")
     for w in OPINION_WORDS:
         if w in "".join(s1):
             p.append(f"§1 に私見表現「{w}」— §2/§4 へ回すこと")
@@ -533,53 +686,78 @@ def cmd_check(report: pathlib.Path, work: pathlib.Path,
         p.append("§1 に `###` のテーマ見出しが無い")
     gate("G10 F: 事実編", p)
 
-    # --- G11 §2 解釈編 -----------------------------------------------------
+    # --- G11 §2 解釈編（項目 1 対 1） --------------------------------------
     p = []
     s2 = body(2)
     subs2 = [x for x in subsections(s2) if x["title"]]
     if not subs2:
         p.append("§2 に `###` の解釈項目が無い")
+    covered: list[str] = []
     for x in subs2:
+        cids = item_cids(x)
+        if len(cids) != 1:
+            p.append(f"§2「{x['title']}」の見出しに担当 CID が {len(cids)} 個（ちょうど 1 個）")
+            continue
+        cid = cids[0]
+        covered.append(cid)
+        r = by_id.get(cid)
+        if not r or r.get("kind") != "interpretation":
+            p.append(f"§2「{x['title']}」: {cid} は台帳の interpretation でない")
+            continue
+        blob = squash("\n".join(x["lines"]))
+        for f, label in (("interpretation", "解釈"), ("alternative", "他の見方")):
+            if squash(r.get(f, "")) not in blob:
+                p.append(f"§2「{x['title']}」: 台帳の {f} がこの項目内に逐語で入っていない")
         for label, minlen in (("事実", 0), ("解釈", 60), ("他の見方", 30)):
             got_v = labelled(x["lines"], label)
             if not got_v:
                 p.append(f"§2「{x['title']}」に `- {label}:` が無い")
             elif len(squash(got_v[0])) < minlen:
                 p.append(f"§2「{x['title']}」の {label} が {minlen} 字未満")
-        for v in labelled(x["lines"], "事実"):
-            cids = CID_RE.findall(v)
-            if not cids:
-                p.append(f"§2「{x['title']}」の 事実 に CID が無い")
-            for cid in cids:
-                if cid not in vids:
-                    p.append(f"§2「{x['title']}」: 事実 に裏取り済み fact でない {cid}")
-    all2 = squash("\n".join(s2))
-    for r in interps:
-        if f"[{r['id']}]" not in "".join(s2):
-            p.append(f"{r['id']}: 解釈が §2 に出ていない")
-        if squash(r.get("interpretation", "")) not in all2:
-            p.append(f"{r['id']}: 台帳の interpretation が §2 に逐語で入っていない")
-        if squash(r.get("alternative", "")) not in all2:
-            p.append(f"{r['id']}: 台帳の alternative（他の見方）が §2 に逐語で入っていない")
+        got_f = labelled(x["lines"], "事実")
+        if got_f:
+            shown = set(CID_RE.findall(got_f[0]))
+            basis = set(r.get("basis") or [])
+            if shown != basis:
+                p.append(f"§2「{x['title']}」の 事実 {sorted(shown)} が台帳 basis "
+                         f"{sorted(basis)} と一致しない")
+    if len(covered) != len(set(covered)):
+        p.append("§2 に同じ CID の項目が複数ある")
+    missing = [r["id"] for r in interps if r["id"] not in set(covered)]
+    if missing:
+        p.append(f"§2 に出ていない解釈: {missing}")
     gate("G11 I: 解釈編", p)
 
-    # --- G12 §3 価値基準編 -------------------------------------------------
+    # --- G12 §3 価値基準編（項目 1 対 1） ----------------------------------
     p = []
     s3 = body(3)
     subs3 = [x for x in subsections(s3) if x["title"]]
     if not subs3:
         p.append("§3 に `###` の価値基準項目が無い")
+    covered = []
     for x in subs3:
+        cids = item_cids(x)
+        if len(cids) != 1:
+            p.append(f"§3「{x['title']}」の見出しに担当 CID が {len(cids)} 個（ちょうど 1 個）")
+            continue
+        cid = cids[0]
+        covered.append(cid)
+        r = by_id.get(cid)
+        if not r or r.get("kind") != "value":
+            p.append(f"§3「{x['title']}」: {cid} は台帳の value でない")
+            continue
+        blob = squash("\n".join(x["lines"]))
+        for f in ("axis", "origin", "tradeoff"):
+            if squash(r.get(f, "")) not in blob:
+                p.append(f"§3「{x['title']}」: 台帳の {f} がこの項目内に逐語で入っていない")
         for label in ("軸", "由来", "トレードオフ"):
             if not labelled(x["lines"], label):
                 p.append(f"§3「{x['title']}」に `- {label}:` が無い")
-    all3 = squash("\n".join(s3))
-    for r in values:
-        if f"[{r['id']}]" not in "".join(s3):
-            p.append(f"{r['id']}: 価値基準が §3 に出ていない")
-        for f in ("axis", "origin", "tradeoff"):
-            if squash(r.get(f, "")) not in all3:
-                p.append(f"{r['id']}: 台帳の {f} が §3 に逐語で入っていない")
+    if len(covered) != len(set(covered)):
+        p.append("§3 に同じ CID の項目が複数ある")
+    missing = [r["id"] for r in values if r["id"] not in set(covered)]
+    if missing:
+        p.append(f"§3 に出ていない価値基準: {missing}")
     gate("G12 V: 価値基準編", p)
 
     # --- G13 §4 表明 -------------------------------------------------------
@@ -597,7 +775,7 @@ def cmd_check(report: pathlib.Path, work: pathlib.Path,
         if len(squash(got_v[0])) < minlen:
             p.append(f"§4 の {label} が {minlen} 字未満")
     if "根拠" in vals:
-        cids = [c for c in CID_RE.findall(vals["根拠"])]
+        cids = CID_RE.findall(vals["根拠"])
         ok = [c for c in cids if c in vids or c in {r["id"] for r in interps}]
         if len(set(ok)) < 2:
             p.append("§4 の 根拠 が事実/解釈の CID 2 件以上を指していない")
@@ -605,30 +783,43 @@ def cmd_check(report: pathlib.Path, work: pathlib.Path,
         vcids = {r["id"] for r in values}
         if not [c for c in CID_RE.findall(vals["前提の価値基準"]) if c in vcids]:
             p.append("§4 の 前提の価値基準 が §3 の CID を指していない")
-    hits = {t for t in toks if squash(t) in squash("\n".join(s4))}
+    hits = {a for a in anchors if squash(a) in squash("\n".join(s4))}
     if len(hits) < 2:
-        p.append(f"§4 が立場に紐づいていない（立場の語のヒット {len(hits)} < 2）")
+        p.append(f"§4 が立場に紐づいていない（立場アンカーのヒット {len(hits)} < 2）")
     gate("G13 E: 表明", p)
 
     # --- G14 付録A（未確認） ----------------------------------------------
     p = []
     s5 = body(5)
     rows5 = [u for u in units(s5) if TABLE_RE.match(u)]
-    for r in unver:
-        line = [u for u in rows5 if r["id"] in u]
-        if not line:
-            p.append(f"{r['id']}: UNVERIFIED が 付録A に無い")
-            continue
-        if len(line) > 1:
-            p.append(f"{r['id']}: 付録A に複数行ある（1 行 1 件）")
-        q = squash(line[0])
-        if not any(squash(x) in q for x in (r.get("searched") or {}).get("queries", [])):
-            p.append(f"{r['id']}: 付録A の「探した範囲」が台帳 searched と対応しない")
+    seen5: list[str] = []
     for u in rows5:
-        for cid in re.findall(r"\bC\d+\b", u):
-            r = by_id.get(cid)
-            if r and not (r.get("kind") == "fact" and r.get("status") == "UNVERIFIED"):
-                p.append(f"付録A に UNVERIFIED でない {cid} が混ざっている")
+        cids = BARE_CID_RE.findall(u)
+        if not cids:
+            continue  # ヘッダ行
+        if len(cids) != 1:
+            p.append(f"付録A の 1 行に CID が {len(cids)} 個（1 行 1 件）: {u[:40]}…")
+            continue
+        cid = cids[0]
+        seen5.append(cid)
+        r = by_id.get(cid)
+        if not r:
+            p.append(f"付録A に台帳外の CID: {cid}")
+            continue
+        if not (r.get("kind") == "fact" and r.get("status") == "UNVERIFIED"):
+            p.append(f"付録A に UNVERIFIED でない {cid} が混ざっている")
+            continue
+        q = squash(u)
+        sr = r.get("searched") or {}
+        if not any(squash(x) in q for x in sr.get("queries", [])):
+            p.append(f"{cid}: 付録A の「探した範囲」に台帳 searched.queries の語が無い")
+        if not any(squash(x) in q for x in sr.get("domains", [])):
+            p.append(f"{cid}: 付録A の「探した範囲」に台帳 searched.domains が無い")
+    if len(seen5) != len(set(seen5)):
+        p.append("付録A に同じ CID の行が複数ある")
+    missing = [r["id"] for r in unver if r["id"] not in set(seen5)]
+    if missing:
+        p.append(f"付録A に出ていない UNVERIFIED: {missing}")
     gate("G14 付録A: 未確認", p)
 
     # --- G15 付録B（反論） -------------------------------------------------
@@ -658,24 +849,37 @@ def cmd_check(report: pathlib.Path, work: pathlib.Path,
     for s in secs:
         if s["num"] in (7, 8, 9):
             continue
-        for line in s["lines"]:
+        for line, fenced in zip(s["lines"], scan_fence(s["lines"])):
+            if fenced:
+                continue
             t = line.strip()
-            if t.startswith("<!--") or t.startswith(">"):
+            if t.startswith(">"):
                 continue
             m = PLACEHOLDER_RE.search(t)
             if m:
                 p.append(f"§{s['num']}: 雛形/TODO が残っている: {m.group(0)}")
+            for tag in re.findall(r"<([^<>\n]{1,60})>", t):
+                if not HTML_TAGISH_RE.match(tag.strip()):
+                    p.append(f"§{s['num']}: 山括弧の雛形が残っている: <{tag}>")
+    # 許される件数 = 台帳から機械的に出る集計 ∪ 根拠テキストに実在する「N 件」
     allowed = {len(rows), len(facts), len(verified), len(unver), len(interps), len(values),
                len(subs2), len(subs3), len(subs6)}
     allowed |= {sum(1 for r in facts if r.get("status") == s) for s in STATUSES}
     allowed |= {len([s for r in rows for s in (r.get("sources") or [])]),
                 len([s for r in rows for s in (r.get("private_sources") or [])])}
+    evidence_text = "\n".join(
+        [str(r.get(f, "")) for r in rows
+         for f in ("text", "restated", "interpretation", "alternative", "axis",
+                   "origin", "tradeoff")]
+        + [str(s.get("quote", "")) for r in rows for s in
+           (r.get("sources") or []) + (r.get("private_sources") or [])])
+    allowed |= {int(n) for n in COUNT_RE.findall(evidence_text)}
     for s in secs:
         if s["num"] in (7, 8, 9):
             continue
         for n in COUNT_RE.findall("\n".join(s["lines"])):
             if int(n) not in allowed:
-                p.append(f"§{s['num']}: 手書きの件数 {n} 件 が台帳の集計と合わない")
+                p.append(f"§{s['num']}: 手書きの件数 {n} 件 が台帳の集計にも根拠テキストにも無い")
     gate("G16 placeholder・件数", p)
 
     # --- G17 散文主体 ------------------------------------------------------
@@ -702,6 +906,26 @@ def cmd_check(report: pathlib.Path, work: pathlib.Path,
         if rt > 0.4:
             p.append(f"§{num} の表比率 {rt:.0%}（40% 以下）— 本文は散文で書く")
     gate("G17 散文主体", p)
+
+    # --- G18 逆分類の説明責任 ----------------------------------------------
+    # 意味の妥当性は機械では判定できない。ここでやるのは「表層シグナルのある
+    # 逆分類には厚い説明を要求する」ことだけ。**分類の禁止ではない**ので、
+    # 誤検出しても kind_rationale を 40 字書けば通る = 散文は壊れない。
+    p = []
+    for r in rows:
+        k = r.get("kind")
+        why = len(squash(r.get("kind_rationale", "")))
+        if k in ("interpretation", "value") and matches(FACTLIKE_RES, r.get("text", "")):
+            if why < 40:
+                p.append(f"{r['id']}: 事実らしい記述（数値・日付・発表動詞・帰属表現）を "
+                         f"{k} にしている。なぜ真偽を問える記述でないかを 40 字以上で"
+                         f"（現在 {why} 字）")
+        if k == "fact" and matches(NORMATIVE_RES, r.get("text", ""), r.get("restated", "")):
+            if why < 40:
+                p.append(f"{r['id']}: 規範的な語（べき・望ましい・優先 等）を含む記述を "
+                         f"fact にしている。なぜ価値判断でなく事実かを 40 字以上で"
+                         f"（現在 {why} 字）")
+    gate("G18 逆分類の説明責任", p)
 
     # --- 出力 -------------------------------------------------------------
     bad = 0
