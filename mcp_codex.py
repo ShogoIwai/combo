@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MCP server: fork a task from Claude Code into a one-shot Codex (GPT-5.5) run,
+"""MCP server: fork a task from Claude Code into a one-shot Codex (GPT-5.6) run,
 scoped to a single repository as its sandbox.
 
 Why this exists
@@ -25,7 +25,7 @@ Beyond forking code tasks, this server also provides an external-access tool:
 reusing the same one-shot `codex exec` fork mechanism.
 
 Auth/model: reuses the Codex login already on the host (`~/.codex`). The model is
-whatever Codex is configured to use (GPT-5.5 by default) unless CODEX_MODEL pins
+whatever Codex is configured to use (GPT-5.6 by default) unless CODEX_MODEL pins
 one. This is the *cloud* Codex path; it does not read OPENAI_* from source_local.
 
 Only the Python standard library + FastMCP are used.
@@ -55,7 +55,7 @@ FORK_BASE = os.environ.get("CODEX_FORK_BASE") or os.path.expanduser("~/rep")
 # Default repo when a tool call omits `repo` (relative to FORK_BASE or absolute).
 FORK_DEFAULT_REPO = os.environ.get("CODEX_FORK_DEFAULT_REPO", "")
 
-# Model pin. Empty -> use Codex's configured default (GPT-5.5).
+# Model pin. Empty -> use Codex's configured default (GPT-5.6).
 CODEX_MODEL = os.environ.get("CODEX_MODEL", "") or None
 
 # Wall-clock cap for one fork (seconds). Codex tasks can be long; default 30 min.
@@ -157,7 +157,7 @@ def _log(tool, repo, sandbox, input_chars, latency_s, status) -> None:
 
 @mcp.tool()
 def fork_to_codex(task: str, repo: str = "", sandbox: str = "workspace-write") -> str:
-    """Fork a self-contained coding task to Codex (GPT-5.5), sandboxed to one repo.
+    """Fork a self-contained coding task to Codex (GPT-5.6), sandboxed to one repo.
 
     Use this to hand off a concrete, bounded piece of work (implement X, refactor
     Y, fix the failing test in Z) that should run *inside a single repository*.
@@ -177,7 +177,7 @@ def fork_to_codex(task: str, repo: str = "", sandbox: str = "workspace-write") -
 
 @mcp.tool()
 def ask_codex(question: str, repo: str = "") -> str:
-    """Ask Codex (GPT-5.5) a read-only question about a repository.
+    """Ask Codex (GPT-5.6) a read-only question about a repository.
 
     Same fork mechanism as `fork_to_codex` but pinned to the "read-only" sandbox:
     Codex may inspect files and run read commands inside `repo` but makes no
@@ -188,7 +188,7 @@ def ask_codex(question: str, repo: str = "") -> str:
 
 @mcp.tool()
 def web_rag(query: str, repo: str = "") -> str:
-    """Answer a question using Codex (GPT-5.5) with live web search (grounded RAG).
+    """Answer a question using Codex (GPT-5.6) with live web search (grounded RAG).
 
     Use this whenever the answer depends on facts outside the model's own
     knowledge: anything post-cutoff, any "latest"/release/version/pricing claim,
