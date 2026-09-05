@@ -73,6 +73,15 @@ SELF_BLAME = [
     "情けない", "浅はかだった", "自分が悪い", "自戒", "私の落ち度",
     "自分の落ち度", "怠っていた", "怠慢だった", "ダメだった", "駄目だった",
 ]
+# 裏取りで埋まった差分（呼び名・年代・正式名称）は、この工程が済ませた作業であって
+# 書き手の落ち度ではない。それを「私は確かめないまま持ち帰っていた」という形の結語に
+# 化けさせるのは自己採点の言い換えなので、SELF_BLAME と同じ場所で弾く。
+# **感情としての悔しさは §2/§3 に書いてよい**（検査対象は statement と §9 の核の一文だけ）。
+MEMORY_FAULT = [
+    "確かめないまま", "確かめずに", "うろ覚え", "思い込んで", "思い込みで",
+    "記憶違い", "覚え違い", "正確に覚え", "勘違いして", "取り違えて",
+    "鵜呑みに", "そのまま前提に", "自分の前提として持ち帰",
+]
 FIRST_PERSON = re.compile(r"(私|わたし|自分|僕|ぼく|俺|おれ|うち)")
 PLACEHOLDER = re.compile(r"(<[^>\n]{1,60}>|＜[^＞\n]{1,60}＞|TODO|TBD|FIXME|xxx|XXX)")
 EID_RE = re.compile(r"\bE\d+\b")
@@ -692,12 +701,14 @@ def cmd_check(note_path, work, memos):
           "check_note.py report を回して §0 に貼ること")
 
     blame = []
+    words = SELF_BLAME + MEMORY_FAULT
     for e in essence:
         t = QUOTED.sub("", str(e.get("statement", "")))
-        blame += [f"{e['id']}:{w}" for w in SELF_BLAME if w in t]
+        blame += [f"{e['id']}:{w}" for w in words if w in t]
     core_line = QUOTED.sub("", cores[0]) if len(cores) == 1 else ""
-    blame += [f"§9核:{w}" for w in SELF_BLAME if w in core_line]
+    blame += [f"§9核:{w}" for w in words if w in core_line]
     R.add("G21 結語（エッセンスの statement・§9 の核の一文）を自己採点で閉じない"
+          "／裏取りで埋まった差分を「確かめていなかった」という結語にしない"
           "（自責の感情そのものは §2/§3 に書いてよい）", not blame, f"{blame[:5]}")
 
     return R.report()
