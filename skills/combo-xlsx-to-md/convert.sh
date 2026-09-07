@@ -230,7 +230,25 @@ if [[ $ENABLE_OCR -eq 1 ]]; then
         # xlsx is a ZIP; images are in xl/media/
         unzip -o "$INPUT" "xl/media/*" -d "$WORKDIR" > /dev/null 2>&1 || true
 
-        PNG_COUNT=$(find "$WORKDIR" -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" | wc -l)
+        # Diagrams pasted into Excel from Visio/PowerPoint are stored as EMF,
+        # which the OCR model cannot read; convert them to PNG like the docx
+        # skill does, and say so when the converter is missing (silently
+        # dropping them loses whole figures).
+        EMF_COUNT=$(find "$WORKDIR" -name "*.emf" | wc -l)
+        if [[ $EMF_COUNT -gt 0 ]]; then
+            if command -v libreoffice >/dev/null 2>&1; then
+                # -print0/read -d '' so a media name with a space is not split;
+                # a conversion that yields no PNG is a lost figure, so warn.
+                while IFS= read -r -d '' emf; do
+                    libreoffice --headless --convert-to png "$emf" --outdir "$(dirname "$emf")" > /dev/null 2>&1 || true
+                    [[ -f "${emf%.emf}.png" ]] || echo "  Warning: EMF→PNG conversion failed for $(basename "$emf"); figure skipped." >&2
+                done < <(find "$WORKDIR" -name "*.emf" -print0)
+            else
+                echo "  Warning: $EMF_COUNT EMF image(s) present but LibreOffice not found; they are skipped." >&2
+            fi
+        fi
+
+        PNG_COUNT=$(find "$WORKDIR" \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" \) | wc -l)
         echo "  → Extracted $PNG_COUNT images to $WORKDIR"
 
         # Step 3: OCR each image
@@ -241,18 +259,25 @@ if [[ $ENABLE_OCR -eq 1 ]]; then
             echo "  Set OCR_TO_MD=/path/to/ocr_to_md.sh to enable OCR; skipping." >&2
         elif curl -fsS --max-time 3 "${OLLAMA_HOST:-http://localhost:11434}/api/tags" > /dev/null 2>&1 && \
            curl -fsS --max-time 3 "${OLLAMA_HOST:-http://localhost:11434}/api/tags" 2>/dev/null | \
-           jq -e '.models[]?.name | select(. == "glm-ocr:bf16")' > /dev/null 2>&1; then
+           jq -e --arg m "${OCR_MODEL:-glm-ocr:bf16}" '.models[]?.name | select(. == $m)' > /dev/null 2>&1; then
             N=0
             TOTAL=$(find "$WORKDIR" \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" \) | wc -l)
 
-            for img in $(find "$WORKDIR" \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" \) | sort); do
+            while IFS= read -r -d '' img; do
                 N=$((N + 1))
                 BASENAME=$(basename "$img")
                 OCR_OUTPUT="$WORKDIR/ocr_${BASENAME}.md"
 
                 echo "  [${N}/${TOTAL}] OCR: $img" >&2
+                # Judge by the produced text, not by exit status. Drop a blank
+                # result so it cannot be appended as an empty "## Image:" section,
+                # and warn (the skill verification keys on a clean stderr).
                 "$OCR_TO_MD" --force "$img" "$OCR_OUTPUT" > /dev/null 2>&1 || true
-            done
+                if [[ ! -s "$OCR_OUTPUT" ]] || [[ -z "$(tr -d '[:space:]' < "$OCR_OUTPUT")" ]]; then
+                    rm -f "$OCR_OUTPUT"
+                    echo "  Warning: OCR produced no text for $(basename "$img")" >&2
+                fi
+            done < <(find "$WORKDIR" \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" \) -print0 | sort -z)
 
             # Append OCR results to output (only if images were processed)
             if [[ -d "$WORKDIR" ]]; then
@@ -269,7 +294,7 @@ if [[ $ENABLE_OCR -eq 1 ]]; then
                     echo "# Embedded Images (OCR'd)"
                     echo ""
 
-                    for ocr_file in $(find "$WORKDIR" -name "ocr_*.md" | sort); do
+                    while IFS= read -r -d '' ocr_file; do
                         IMG_NAME=$(basename "$ocr_file" .md | sed 's/^ocr_//')
                         echo "## Image: $IMG_NAME"
                         echo ""
@@ -277,7 +302,7 @@ if [[ $ENABLE_OCR -eq 1 ]]; then
                         echo ""
                         echo "---"
                         echo ""
-                    done
+                    done < <(find "$WORKDIR" -name "ocr_*.md" -print0 | sort -z)
                 } >> "${OUTPUT%.md}_temp.md"
 
                 rm -rf "$WORKDIR"
@@ -290,7 +315,7 @@ if [[ $ENABLE_OCR -eq 1 ]]; then
             if ! curl -fsS --max-time 3 "${OLLAMA_HOST:-http://localhost:11434}/api/tags" > /dev/null 2>&1; then
                 echo "  Warning: Ollama not reachable, skipping OCR." >&2
             else
-                echo "  Warning: glm-ocr model not found, skipping OCR." >&2
+                echo "  Warning: OCR model ${OCR_MODEL:-glm-ocr:bf16} not found, skipping OCR." >&2
             fi
         fi
     fi

@@ -19,7 +19,7 @@ reached.
 | **type**                 | `one-shot` — the output `.md` is fully regenerated from the input on every run and overwritten in place; existing output is never used as a source. |
 | **Output**         | A single `.md` file (default: input basename with `.md`) — see **Output Structure**.                                                      |
 | **goal**           | The output `.md` exists and is non-empty; it carries one Markdown heading per `Heading N`/`TOC N` paragraph and one Markdown table per table of the source; and — when `--ocr` was requested — an OCR section is present for every image the script actually OCRs (see **Limitations**). |
-| **Verification**         | Run `convert.sh`; exit code must be 0. Then: the output is non-empty; the count of `^#{1,6} ` lines is >= the number of source paragraphs whose style matches `Heading N`/`TOC N` (read the source with python-docx); the number of Markdown tables equals `len(Document(src).tables)`. With `--ocr`, stderr must contain **no `Warning:` line** (OCR degrades via warnings, not failures) and the output must hold one OCR section per `word/media/*.png` plus per EMF converted to PNG. |
+| **Verification**         | Run `convert.sh`; exit code must be 0. Then: the output is non-empty; the count of `^#{1,6} ` lines is >= the number of source paragraphs whose style matches `Heading N`/`TOC N` (read the source with python-docx); the number of Markdown tables equals `len(Document(src).tables)`. With `--ocr`, stderr must contain **no `Warning:` line** (OCR degrades via warnings, not failures) and the output must hold one OCR section per `word/media/*.png` plus per EMF converted to PNG — a blank OCR result is dropped and reported as a warning, so a missing section always shows up on stderr. |
 | **loop limit** | 3                                                                                                                                          |
 
 ## When to Use
@@ -32,8 +32,9 @@ reached.
 
 1. **python3 + python-docx** — always required, for structured extraction
 2. **unzip** — only for `--ocr` (image extraction from the docx ZIP)
-3. **LibreOffice** — only for `--ocr`, to convert EMF images to PNG.
-   Text-only conversion never invokes it, even for an EMF-bearing docx.
+3. **LibreOffice** — only for `--ocr`, and only when the docx holds EMF images;
+   they are converted to PNG before OCR. A PNG-only docx converts without it,
+   and text-only conversion never invokes it at all.
 4. **curl, jq, and an executable OCR helper** — only for `--ocr`. The helper
    defaults to `ocr_to_md.sh` in the shared `ollama/` directory next to `combo/`;
    set `OCR_TO_MD=/path/to/ocr_to_md.sh` if it lives elsewhere.
@@ -96,6 +97,9 @@ reached.
 - **OCR is best-effort and never fails the run.** A missing OCR helper,
   unreachable Ollama, absent model, or a per-image OCR error is reported as
   `Warning:` and the script still exits 0 with text-only output.
+- **The OCR section is omitted entirely** when the document has no OCR-able image
+  (a plain note on stdout) or when no image yielded text (a `Warning:` on stderr);
+  the run still succeeds either way.
 - **OCR covers PNG only** (plus EMF converted to PNG). Embedded JPEG/GIF/TIFF are
   extracted but skipped.
 - **Table cells are not escaped**: cell text containing `|` or newlines can break

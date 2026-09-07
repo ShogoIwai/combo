@@ -19,7 +19,7 @@ reached.
 | **type**                 | `one-shot` — the output `.md` is fully regenerated from the workbook on every run and overwritten in place; existing output is never used as a source. |
 | **Output**         | A single `.md` file (default: input basename with `.md`) — see **Output Structure**. `--list-sheets` writes no file; it prints to stdout and exits. |
 | **goal**           | The output `.md` exists and is non-empty, and every sheet that holds data appears as a `## Sheet Name` section whose table has a header row, a separator row and a consistent column count. |
-| **Verification**         | Run `convert.sh`; exit code must be 0. Enumerate the workbook's sheets **and their emptiness** directly (openpyxl/xlrd — `--list-sheets` cannot do this, see **Limitations**) and require a `## ` section in the output for each sheet with data. For each table, check the separator row is present and every row's pipe count matches the header's. stderr must contain no `Error:` **and no `Warning: could not read sheet`** (an unreadable sheet is skipped, not failed). With `--ocr`, require one OCR section per extracted `.png`/`.jpg`/`.jpeg` and no `Warning:` line. |
+| **Verification**         | Run `convert.sh`; exit code must be 0. Enumerate the workbook's sheets **and their emptiness** directly (openpyxl/xlrd — `--list-sheets` cannot do this, see **Limitations**) and require a `## ` section in the output for each sheet with data. For each table, check the separator row is present and every row's pipe count matches the header's. stderr must contain no `Error:` **and no `Warning: could not read sheet`** (an unreadable sheet is skipped, not failed). With `--ocr`, require one OCR section per extracted `.png`/`.jpg`/`.jpeg` (EMF images included, via their PNG conversion) and no `Warning:` line — a blank OCR result is dropped and reported as a warning, so a missing section always shows up on stderr. |
 | **loop limit** | 3                                                                                                                                              |
 
 ## When to Use
@@ -39,7 +39,9 @@ reached.
 4. **unzip, curl, jq, and an executable OCR helper** — only for `--ocr`. The
    helper defaults to `ocr_to_md.sh` in the shared `ollama/` directory next to
    `combo/`; set `OCR_TO_MD=/path/to/ocr_to_md.sh` if it lives elsewhere.
-5. **Ollama + glm-ocr model** — only for `--ocr` (`ollama pull glm-ocr:bf16`)
+5. **LibreOffice** — only for `--ocr`, and only when the workbook holds EMF
+   images (Visio/PowerPoint pastes); they are converted to PNG before OCR
+6. **Ollama + glm-ocr model** — only for `--ocr` (`ollama pull glm-ocr:bf16`)
 
 ## Usage
 
@@ -109,4 +111,6 @@ reached.
   never cached yields an empty cell.
 - **OCR is best-effort and never fails the run**: a missing helper, unreachable
   Ollama, absent model, or per-image error is a `Warning:` and the script exits 0.
-  Only `.png`/`.jpg`/`.jpeg` are OCR'd; other media are ignored.
+  Only `.png`/`.jpg`/`.jpeg` are OCR'd (plus EMF converted to PNG by LibreOffice);
+  other media are ignored. An image the model returns nothing for is dropped with
+  a `Warning:` rather than appended as an empty section.
