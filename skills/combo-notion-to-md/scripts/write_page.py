@@ -79,6 +79,106 @@ def sanitize(title: str):
     return name + ".md", notes
 
 
+# Markdown の生 HTML ブロック (CommonMark type 6/7) は「空行が来るまで」続く。
+# Notion の取得結果は行間に空行が無いので、<table> 等をそのまま書くと閉じタグ以降の
+# 本文 (見出しを含む) まで HTML ブロックに飲み込まれ、`##` が見出しにならない。
+# 対策は空行の挿入だけ — 原文の行は 1 行も削らず・並べ替えず・書き換えない。
+_BLOCK_TAGS = frozenset((
+    "table", "details", "figure", "div", "aside", "blockquote",
+    "callout", "columns", "column", "page-discussions",
+))
+# 行中のタグを 1 つずつ拾う (属性値の中の `>` は Notion の出力では出てこない)
+_TAG = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9-]*)(\s[^>]*?)?(/?)>")
+# 開始タグが複数行にまたがる場合 (`<table` で改行し次行に属性が続く) の先頭行
+_PARTIAL = re.compile(r"^ {0,3}<([A-Za-z][A-Za-z0-9-]*)\s*$")
+# コードフェンス (``` / ~~~ を 3 個以上、先頭 3 スペースまで)
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def _fence_state(ln: str, fence: str | None) -> str | None:
+    """コードフェンスの開閉を追う。開いていれば現在のフェンス文字列を返す。"""
+    m = _FENCE.match(ln)
+    if not m:
+        return fence
+    mark, rest = m.group(1), m.group(2)
+    if fence is None:
+        # 情報文字列に ` は使えない (``` の場合)
+        if mark[0] == "`" and "`" in rest:
+            return None
+        return mark
+    # 閉じるのは同じ文字・同じ長さ以上で、後ろに何も無い行だけ
+    if mark[0] == fence[0] and len(mark) >= len(fence) and not rest.strip():
+        return None
+    return fence
+
+
+def _scan(ln: str):
+    """行を走査して (ブロックタグで始まるか, 深さの増減リスト) を返す。"""
+    opens_here = False
+    deltas = []
+    for m in _TAG.finditer(ln):
+        closing, name, _attrs, selfclose = m.group(1), m.group(2).lower(), m.group(3), m.group(4)
+        if name not in _BLOCK_TAGS:
+            continue
+        indent = len(ln) - len(ln.lstrip(" "))
+        if not closing and m.start() == indent and indent <= 3:
+            opens_here = True
+        if selfclose:          # <div /> は開いて閉じるので深さを動かさない
+            continue
+        deltas.append(-1 if closing else +1)
+    return opens_here, deltas
+
+
+def isolate_html_blocks(lines: list[str]) -> list[str]:
+    """最外周の生 HTML ブロックの前後に空行を入れる (空行の挿入だけ)。
+
+    - コードフェンスの中は一切触らない (例として書かれた <table> で誤爆しない)。
+    - 自己閉じタグは深さを動かさない。閉じタグが来ないまま本文が終わった場合は
+      末尾まで「ブロックの中」のままだが、行の中身は変えない。
+    """
+    out: list[str] = []
+    depth = 0
+    fence: str | None = None
+    in_tag = False                     # 開始タグが行をまたいでいる最中
+    for idx, ln in enumerate(lines):
+        if in_tag:                     # `>` が来るまでタグの続き — 素通し
+            out.append(ln)
+            if ">" in ln:
+                in_tag = False
+            continue
+        if fence is not None:          # コードフェンスの中 — 素通し
+            fence = _fence_state(ln, fence)
+            out.append(ln)
+            continue
+        nf = _fence_state(ln, fence)
+        if nf is not None:             # フェンスが開いた行
+            fence = nf
+            out.append(ln)
+            continue
+
+        pm = _PARTIAL.match(ln)
+        if pm and pm.group(1).lower() in _BLOCK_TAGS:
+            if depth == 0 and out and out[-1].strip():
+                out.append("")
+            out.append(ln)
+            depth += 1
+            in_tag = True
+            continue
+
+        opens_here, deltas = _scan(ln)
+        prev = depth
+        if depth == 0 and opens_here and out and out[-1].strip():
+            out.append("")             # ブロックの前を切り離す
+        out.append(ln)
+        for d in deltas:
+            depth = max(0, depth + d)  # 不均衡な閉じタグで負にしない
+        if depth == 0 and (opens_here or prev > 0) and out[-1].strip() \
+                and (idx + 1 >= len(lines) or lines[idx + 1].strip()):
+            out.append("")             # ブロックの後ろを切り離す
+    # 末尾に増やした空行は build() 側の strip("\n") で落ちる
+    return out
+
+
 def build(title: str, body: str, source: str | None) -> str:
     """H1 と出所コメントを決定論的に付けた最終本文を返す。"""
     lines = body.replace("\r\n", "\n").split("\n")
@@ -88,6 +188,7 @@ def build(title: str, body: str, source: str | None) -> str:
         i += 1
     if i < len(lines) and lines[i].startswith("# ") and lines[i][2:].strip() == title.strip():
         del lines[: i + 1]
+    lines = isolate_html_blocks(lines)
     body = "\n".join(lines).strip("\n")
 
     head = [f"# {title.strip()}"]
