@@ -1,7 +1,7 @@
 # Combo — Claude Code ⇄ Codex cross-fork coordination
 
 `combo/` is the **cloud-only** coordination layer between the two cloud coding
-agents on this host — **Claude Code** (Anthropic) and **Codex** (OpenAI GPT-5.5).
+agents on this host — **Claude Code** (Anthropic) and **Codex** (OpenAI).
 It lets either agent hand a whole, self-contained task to the other and pull the
 result back, so each can lean on the other where it is stronger. It also serves as
 the **single source of truth for skills shared by both harnesses** — reusable
@@ -221,9 +221,11 @@ codex mcp add claude -- python3 $REP/combo/mcp_claude.py
 > path through `ask_codex` works).
 
 Each fork runs on the **cloud** model: `mcp_codex.py` reuses the Codex login
-(`~/.codex`, GPT-5.5 by default) and `mcp_claude.py` inherits the parent Claude
-Code auth as-is. `web_rag` is the external-access path — query it whenever an
-answer depends on facts outside the model's knowledge (anything post-cutoff, any
+(`~/.codex`) and `mcp_claude.py` inherits the parent Claude Code auth as-is.
+The Codex model is not pinned here — it is whatever Codex itself is configured
+to use in `~/.codex/config.toml`, overridable per-server with `CODEX_MODEL`.
+`web_rag` is the external-access path — query it whenever an answer depends on
+facts outside the model's knowledge (anything post-cutoff, any
 "latest"/version/pricing claim) rather than guessing.
 
 ### Environment overrides
@@ -364,7 +366,7 @@ notes, Notion research) can be **shared** by both agents from a single source of
 truth in `combo/`, while harness- or repo-specific procedures stay local. The
 whole scheme rests on one fact about how each harness discovers skills:
 
-|                            | Claude Code                                                   | Codex (GPT-5.5)                                                                                              |
+|                            | Claude Code                                                   | Codex                                                                                              |
 | -------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | Format                     | `SKILL.md` (`name` / `description` / `allowed-tools`) | `SKILL.md` (`name` / `description`, optional `metadata.short-description`)                           |
 | User-global path           | `~/.claude/skills/`                                         | `~/.agents/skills/` (`~/.codex/skills/` still read but **deprecated**)                             |

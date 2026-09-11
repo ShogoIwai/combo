@@ -7,7 +7,7 @@
     "(複製は G15 で落ちる)。supported / agree / specific が false のものは台帳へ戻して直し、",
     "直したうえで再レビューする。false のまま PASS は取れない。"
   ],
-  "reviewer": "codex (GPT-5.5) via mcp__codex__ask_codex",
+  "reviewer": "codex via mcp__codex__ask_codex",
   "date": "2026-08-06",
   "facts": {
     "C1": {
