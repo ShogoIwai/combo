@@ -55,6 +55,7 @@ The whole design rests on five facts about this environment:
 | `usage_claude.log` | JSONL usage records written by `mcp_claude.py` (gitignored).                                                                                                                                         |
 | `link_skills.sh`   | Idempotent bootstrap that symlinks each `combo/skills/<name>` into each harness's **user-global** search path (`~/.claude/skills`, `~/.agents/skills`).                                          |
 | `skills/`          | **Shared skills** source of truth — one dir per skill (`combo-<name>/SKILL.md`), symlinked into both harnesses (see[Skill sharing across both harnesses](#skill-sharing-across-both-harnesses)). |
+| `hooks/`           | **Claude Code hook** scripts (`stop_rg_cleanup.sh`, `session_end_cleanup.sh`) called from `~/.claude/settings.json` (see [Claude Code hooks](#claude-code-hooks-combohooks)).                 |
 
 ### Dependency
 
@@ -240,44 +241,6 @@ Both servers share the same shape of knobs (`CODEX_*` / `CLAUDE_*`):
 | `CODEX_MODEL`              | `CLAUDE_FORK_MODEL`          | (empty → CLI default)      | Pin the fork model                   |
 | `CODEX_FORK_TIMEOUT`       | `CLAUDE_FORK_TIMEOUT`        | `1800`                    | Per-fork wall-clock cap (seconds)    |
 | `CODEX_FORK_USAGE_LOG`     | `CLAUDE_FORK_USAGE_LOG`      | `combo/usage_*.log`       | JSONL usage log path                 |
-
----
-
-## Claude Code rg-cleanup `Stop` hook (insurance)
-
-With the fork model, neither agent runs search tooling at the multi-repo root, so
-the old root-level `rg .` fallback that orphaned `rg` processes should not fire.
-The `Stop` hook below is kept as **belt-and-suspenders only** — it costs nothing
-and still reaps any stray `rg` from other sources when a Claude Code session ends.
-
-Add to `~/.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "MY_SID=$(ps -p $$ -o sid= 2>/dev/null | tr -d ' '); pgrep -u \"$(id -un)\" rg 2>/dev/null | while read p; do [ \"$(ps -p $p -o sid= 2>/dev/null | tr -d ' ')\" = \"$MY_SID\" ] && kill $p 2>/dev/null; done; true"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-The hook matches `rg` processes by **session ID (SID)**: SID is inherited at fork
-and survives reparenting to init, so an orphaned `rg` still carries the Claude
-Code session's SID.
-
-> **Best-effort:** `rg` started from the *same terminal session* that launched
-> Claude Code shares the SID and would also be killed. In practice intentional
-> long-running `rg` in that terminal alongside an active session is rare, so the
-> trade-off is acceptable.
 
 ---
 
@@ -533,3 +496,57 @@ reliably from a fork: **pin `repo` to `combo`** (or the target repo), and **name
 the skill explicitly** in the `task`/`question` — e.g. "follow the steps in
 `combo/skills/combo-<name>/SKILL.md`". (Same statelessness as everywhere else in this
 directory: the fork sees only what the call string carries.)
+
+---
+
+## Claude Code hooks (`combo/hooks/`)
+
+Hook bodies live as scripts in `combo/hooks/`; `~/.claude/settings.json` only
+calls them, so edits are version-controlled here instead of inlined as JSON.
+
+| Event        | Script                         | What it does                                                        |
+| ------------ | ------------------------------ | ------------------------------------------------------------------- |
+| `Stop`       | `hooks/stop_rg_cleanup.sh`     | Kill `rg` processes in this session's SID (insurance, see below)    |
+| `SessionEnd` | `hooks/session_end_cleanup.sh` | Kill leftover `claude.exe` in this session's SID (see below)          |
+
+`~/.claude/settings.json` (replace `<launch-root>` with the absolute path of your
+launch root; the inner `\"…\"` keeps the path intact for the shell if it contains
+spaces):
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      { "matcher": "", "hooks": [
+        { "type": "command", "command": "\"<launch-root>/combo/hooks/stop_rg_cleanup.sh\"" } ] }
+    ],
+    "SessionEnd": [
+      { "matcher": "", "hooks": [
+        { "type": "command", "command": "\"<launch-root>/combo/hooks/session_end_cleanup.sh\"" } ] }
+    ]
+  }
+}
+```
+
+Both scripts match processes by **session ID (SID)**: SID is inherited at fork
+and survives reparenting to init, so an orphaned child still carries the Claude
+Code session's SID, while other terminals' sessions (different SID) are untouched.
+Process names are matched as a whole-name regex (`pgrep -x rg`,
+`pgrep -x 'claude\.exe'` — the `.` is escaped); an unanchored `pgrep rg` would
+also match the hook script itself (`stop_rg_cleanup.sh`).
+
+SID alone cannot tell a leftover `claude.exe` from a live sibling session started
+from the same terminal, so `session_end_cleanup.sh` additionally requires the
+target to be either **a descendant of the ending session's own `claude.exe`**
+(sub-agents, `claude -p` forks it spawned) or **an orphan reparented to
+init/systemd**. A sibling session (parent = the shell) and that sibling's own
+forks match neither and are left alone.
+
+With the fork model, neither agent runs search tooling at the multi-repo root, so
+the old root-level `rg .` fallback that orphaned `rg` processes should not fire;
+the `Stop` hook is kept as **belt-and-suspenders only**.
+
+> **Best-effort:** `rg` started from the *same terminal session* that launched
+> Claude Code shares the SID and would also be killed. In practice intentional
+> long-running `rg` in that terminal alongside an active session is rare, so the
+> trade-off is acceptable.
