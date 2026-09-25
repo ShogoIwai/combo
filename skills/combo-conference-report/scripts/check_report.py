@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
-"""check_report.py — カンファレンス参加レポートの機械生成ブロック作成 (report) と
-ゲート検査 (check)。
+"""check_report.py — カンファレンス参加／他社ソリューション資料レポートの
+機械生成ブロック作成 (report) とゲート検査 (check)。
+
+manifest.json の source_type (conference | vendor) でモードが決まる。vendor では
+§1 の章題が変わり、資料ページとの照合 (G5)・主張主体と独立性 (G17)・資料メモの
+忠実性レビュー (G15) が加わる。conference の挙動は変えない。
 
   python3 check_report.py report --work <work>
       work/ledger.json から 付録D 判定サマリ / 付録E 裏取り台帳 / 付録F 出典一覧 を
@@ -10,7 +14,7 @@
 
   python3 check_report.py check --report <out.md> --work <work>
                                [--notes a.md b.md] [--stance s.md]
-      17 ゲート。exit 0 で PASS、1 で FAIL、2 で入力不備。
+      17 ゲート (vendor は G17 を加えて 18)。exit 0 で PASS、1 で FAIL、2 で入力不備。
       --notes/--stance を渡すと manifest のパス申告を信用せず、その入力で再現照合する。
 
 ## 検査できることの限界 (正直に書いておく)
@@ -43,7 +47,7 @@ import unicodedata
 import urllib.parse
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from init_ledger import build_claims, norm  # noqa: E402
+from init_ledger import build_claims, build_materials, norm  # noqa: E402
 
 PUBLIC_SOURCED = ("CONFIRMED", "CORRECTED", "PARTIAL")
 PRIVATE = "PRIVATE_PRIMARY"          # 非公開の一次資料しか根拠が無い (公開URLでは裏取り不能)
@@ -80,6 +84,12 @@ SECTIONS = [
     (8, "付録E. 裏取り台帳"),
     (9, "付録F. 出典一覧"),
 ]
+# モードで変わるのは §1 の表題だけ (会場で聞いた話か、資料に書かれた主張か)
+SECTION1_TITLE = {
+    "conference": "事実編（会場情報と裏取り結果）",
+    "vendor": "事実編（資料の主張と裏取り結果）",
+}
+MATERIAL_REF_RE = re.compile(r"\bM(\d+)\s*p\.?\s*\d+")   # 資料メモのページ参照 (M1 p.3)
 GEN_FILES = {6: "section0.md", 7: "summary.md", 8: "ledger_table.md", 9: "sources.md"}
 BODY_SECTIONS = (0, 1, 2, 3)   # 散文で書く本文
 # G16 の下限 (いずれも記号・空白を除いた実質文字数)。短いカンファレンスでも
@@ -166,8 +176,15 @@ def rows_of(ledger: dict) -> list[dict]:
 
 
 # ---------------------------------------------------------------- report mode
+def independent_of(r: dict) -> bool:
+    """主張主体以外の発行元による公開出典を 1 本でも持つか (vendor モードの G17)。"""
+    return any(isinstance(x, dict) and x.get("independent") is True
+               for x in (r.get("sources") or []))
+
+
 def do_report(work: pathlib.Path) -> None:
     rows = rows_of(load_json(work / "ledger.json"))
+    vendor = load_json(work / "manifest.json", required=False).get("source_type") == "vendor"
     facts = [r for r in rows if r.get("kind") == "fact"]
     opins = [r for r in rows if r.get("kind") == "opinion"]
     undecided = [r for r in rows if r.get("kind") not in KINDS]
@@ -183,23 +200,40 @@ def do_report(work: pathlib.Path) -> None:
          "| fact の裏取り結果 | 件数 |", "| ----------------- | ---- |"]
     for st in FACT_STATUS:
         s.append(f"| {st} | {len(by[st])} |")
+    if vendor:
+        body = [r for r in facts if r.get("status") in BODY_STATUS]
+        ind = [r for r in body if independent_of(r)]
+        s += ["", "| 裏取り済み fact の出典の独立性 | 件数 |", "| ---------------------------- | ---- |",
+              f"| 主張主体以外の出典あり(第三者裏取り) | {len(ind)} |",
+              f"| 主張主体の自己申告のみ | {len(body) - len(ind)} |"]
     s += ["", "> 本節はスクリプト生成物 (`work/summary.md`)。件数は手で書かない。",
           "> CONFIRMED=公開情報と一致 / CORRECTED=公開情報に照らして言い直した /",
           "> PARTIAL=一部のみ裏取り / PRIVATE_PRIMARY=非公開の一次資料のみが根拠 /",
           "> UNVERIFIED=公開情報が見つからず未確認。"]
+    if vendor:
+        s += ["> 自己申告のみ = 公開出典も資料も主張主体 (ベンダー本人) が出したもので、",
+              "> 第三者による裏づけが無い。本文では主張主体の言い分として書いている。"]
     (work / "summary.md").write_text("\n".join(s) + "\n", encoding="utf-8")
 
-    t = ["## 8. 付録E. 裏取り台帳", "",
-         "| ID | 区分 | 判定 | メモ上の記述 | 事実としての言い直し | 判定根拠 | 出典 |",
-         "| -- | ---- | ---- | ------------ | -------------------- | -------- | ---- |"]
+    t = ["## 8. 付録E. 裏取り台帳", ""]
+    if vendor:
+        t += ["| ID | 区分 | 判定 | 主張主体 | 独立性 | メモ上の記述 | 事実としての言い直し | 判定根拠 | 出典 |",
+              "| -- | ---- | ---- | -------- | ------ | ------------ | -------------------- | -------- | ---- |"]
+    else:
+        t += ["| ID | 区分 | 判定 | メモ上の記述 | 事実としての言い直し | 判定根拠 | 出典 |",
+              "| -- | ---- | ---- | ------------ | -------------------- | -------- | ---- |"]
     for r in rows:
         pub = [x for x in (r.get("sources") or []) if isinstance(x, dict)]
         prv = [x for x in (r.get("private_sources") or []) if isinstance(x, dict)]
         src = " / ".join(f"[{x.get('title') or 'untitled'}]({x.get('url','')})" for x in pub)
         src += (" / " if src and prv else "") + " / ".join(
             f"{x.get('document','?')} p.{x.get('page','?')} (非公開)" for x in prv)
+        extra = ""
+        if vendor:
+            ind = ("第三者" if independent_of(r) else "自己申告") if r.get("kind") == "fact" else "—"
+            extra = f"| {cell(r.get('claimant'))} | {ind} "
         t.append(
-            f"| {cell(r.get('id'))} | {cell(r.get('kind'))} | {cell(r.get('status'))} "
+            f"| {cell(r.get('id'))} | {cell(r.get('kind'))} | {cell(r.get('status'))} {extra}"
             f"| {cell(r.get('text'))} | {cell(r.get('restated'))} "
             f"| {cell(r.get('status_rationale') or r.get('kind_rationale'))} | {cell(src or '—')} |"
         )
@@ -332,6 +366,10 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
     ledger = load_json(work / "ledger.json")
     manifest = load_json(work / "manifest.json")
     rows = rows_of(ledger)
+    source_type = manifest.get("source_type", "conference")
+    vendor = source_type == "vendor"
+    sections = [(n, SECTION1_TITLE.get(source_type, SECTION1_TITLE["conference"]) if n == 1 else t)
+                for n, t in SECTIONS]
     byid: dict[str, dict] = {}
     dup_ids = []
     for r in rows:
@@ -347,6 +385,7 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
 
     # --- G0 入力不変性 -------------------------------------------------------
     ok, detail = True, ""
+    mat_texts = {}
     try:
         notes = [pathlib.Path(p) for p in (notes_cli or manifest.get("notes", []))]
         stance_p = pathlib.Path(stance_cli or manifest.get("stance", ""))
@@ -378,11 +417,30 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
             if not wp.is_file() or wp.read_text(encoding="utf-8").strip() != norm(
                     stance_p.read_bytes().decode("utf-8")).strip():
                 ok, detail = False, "work/stance.md が正本の stance と一致しない"
+        mat_texts: dict[str, list[str]] = {}
+        if ok:
+            # 資料 (--materials) も再抽出してハッシュを照合する。資料を差し替えたり
+            # work/materials のページ本文だけを書き換えて引用照合を通すのを防ぐ。
+            mrecs = manifest.get("materials") or []
+            if vendor and not mrecs:
+                ok, detail = False, "vendor モードなのに資料 (manifest.materials) が無い"
+            elif mrecs:
+                recs2, texts2 = build_materials([pathlib.Path(m["path"]) for m in mrecs])
+                if recs2 != mrecs:
+                    ok, detail = False, "資料 (materials) が init 時から変わった/消えた"
+                else:
+                    for m, pages in zip(recs2, texts2):
+                        mat_texts[m["id"]] = pages
+                        for n, t in enumerate(pages, 1):
+                            f = work / "materials" / m["id"] / f"p{n:03d}.txt"
+                            if not f.is_file() or f.read_text(encoding="utf-8") != t:
+                                ok, detail = False, f"work/materials/{m['id']}/p{n:03d}.txt が再抽出と不一致"
+                                break
     except SystemExit:
-        ok, detail = False, "入力メモを読めない (移動/削除/重複)"
+        ok, detail = False, "入力メモ/資料を読めない (移動/削除/重複/pdftotext 不在)"
     except (OSError, UnicodeError, TypeError, KeyError, ValueError) as e:
         ok, detail = False, f"入力の再現に失敗: {type(e).__name__}: {e}"
-    g("G0 入力不変性 (メモ→claims→ledger を再現・全項目照合、stance のハッシュ一致)", ok, detail)
+    g("G0 入力不変性 (メモ→claims→ledger を再現・全項目照合、stance・資料のハッシュ一致)", ok, detail)
 
     # --- G1 台帳網羅 ---------------------------------------------------------
     cl_ids = [c["id"] for c in claims_obj.get("claims", [])]
@@ -488,9 +546,42 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
             for k in ("document", "page", "classification", "quote", "holder"):
                 if not str(x.get(k, "")).strip():
                     bad.append(f"{r['id']}:{k} 空")
+            mid = str(x.get("material", "")).strip()
+            if mid:
+                # 登録済み資料を根拠にするなら、そのページに引用が実在すること
+                pages = mat_texts.get(mid)
+                if pages is None:
+                    bad.append(f"{r['id']}:material={mid} は登録資料に無い")
+                    continue
+                try:
+                    pg = int(str(x.get("page", "")).strip().lstrip("p.").strip())
+                except ValueError:
+                    bad.append(f"{r['id']}:page={x.get('page')!r} が整数でない (資料照合にはページ番号が要る)")
+                    continue
+                if not 1 <= pg <= len(pages):
+                    bad.append(f"{r['id']}:{mid} p.{pg} は範囲外 (1〜{len(pages)})")
+                    continue
+                q = re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(x.get("quote", ""))))
+                if len(q) < QUOTE_MIN:
+                    bad.append(f"{r['id']}:quote が短すぎる")
+                elif q not in re.sub(r"\s+", "", unicodedata.normalize("NFKC", pages[pg - 1])):
+                    bad.append(f"{r['id']}:quote が {mid} p.{pg} の本文に無い (捏造/ページ違い)")
+            elif vendor:
+                # vendor の非公開根拠は登録資料だけ。material を外して照合を逃れる迂回を塞ぐ
+                bad.append(f"{r['id']}:vendor の private_sources は material (登録資料 M#) が必須")
         if r.get("sources"):
             bad.append(f"{r['id']}:公開 URL があるなら PRIVATE_PRIMARY ではない")
-    g(f"G5 {PRIVATE} は資料名/ページ/機密区分/引用/保持者を持ち、公開 URL を持たない",
+    if vendor:
+        # 資料メモの「(M1 p.3)」参照、または private_sources.material で根拠にしていれば使用
+        used = {str(x.get("material", "")).strip() for r in rows
+                for x in (r.get("private_sources") or []) if isinstance(x, dict)}
+        used |= {f"M{m}" for r in rows for m in MATERIAL_REF_RE.findall(
+            f"{r.get('context', '')} {r.get('text', '')}")}
+        for mid in mat_texts:
+            if mid not in used:
+                bad.append(f"{mid}:どの claim も根拠にしていない (資料を読まずに書いていないか)")
+    g(f"G5 {PRIVATE} は資料名/ページ/機密区分/引用/保持者を持ち、公開 URL を持たない"
+      + ("。資料引用はページ本文に実在" if vendor else ""),
       not bad, f"{bad[:8]}")
 
     # --- G6 UNVERIFIED の探索証跡 -------------------------------------------
@@ -525,7 +616,7 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
     # --- G9 章立てと機械生成ブロック ----------------------------------------
     secs, order = split_sections(md_raw)
     normt = lambda s: unicodedata.normalize("NFKC", s).strip()
-    ok = ([(n, normt(t)) for n, t in order] == [(n, normt(t)) for n, t in SECTIONS])
+    ok = ([(n, normt(t)) for n, t in order] == [(n, normt(t)) for n, t in sections])
     g("G9a 章立て (§0〜§9 が正しい順・正確な表題で 1 回ずつ)", ok, f"{order}")
     for num, fname in GEN_FILES.items():
         p = work / fname
@@ -710,6 +801,12 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
                 e = kinds_rv.get(r["id"])
                 if not isinstance(e, dict) or e.get("agree") is not True:
                     bad.append(f"{r['id']}:opinion 裁定の同意記録なし")
+        mat_rv = (rv.get("materials") or {}) if vendor else {}
+        for mid in mat_texts if vendor else []:
+            e = mat_rv.get(mid)
+            if not isinstance(e, dict) or e.get("faithful") is not True \
+                    or len(str(e.get("note", ""))) < 20:
+                bad.append(f"{mid}:資料メモが資料を歪めず主要な主張を落としていないかのレビュー記録なし")
         st_rv = rv.get("stance_specific") or {}
         for h in heads:
             e = st_rv.get(h)
@@ -717,6 +814,7 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
                 bad.append(f"§2「{h}」:立場固有性のレビュー記録なし")
         notes = [str(e.get("note", "")) for e in
                  list(facts_rv.values()) + list(kinds_rv.values()) + list(st_rv.values())
+                 + list(mat_rv.values())
                  if isinstance(e, dict)]
         keys = [key_of(n) for n in notes if key_of(n)]
         if keys and len(set(keys)) < len(keys):
@@ -768,6 +866,33 @@ def do_check(report: pathlib.Path, work: pathlib.Path,
         bad.append(f"本文の {tb * 100 // total}% が表 (40% 超で FAIL。台帳・一覧は付録へ)")
     g("G16 本文 (§0〜§3) が散文主体 (表は補助・各節に地の文がある)", not bad,
       f"{bad[:8]}" + (f" ほか {len(bad) - 8} 件" if len(bad) > 8 else ""))
+
+    # --- G17 主張主体と出典の独立性 (vendor のみ) ----------------------------
+    # ベンダー資料の数字は、ベンダー自身の Web ページで「CONFIRMED」になっても
+    # 「ベンダーがそう言っている」以上の意味を持たない。自己申告しか無い事実を
+    # 客観的事実として §1 に書くのを防ぐ。
+    if vendor:
+        bad = []
+        for r in rows:
+            if r.get("kind") != "fact":
+                continue
+            who = str(r.get("claimant") or "").strip()
+            if not who:
+                bad.append(f"{r['id']}:claimant (主張主体) が空")
+                continue
+            wk = text_key(who).lower()
+            for x in r.get("sources") or []:
+                if not isinstance(x, dict):
+                    continue
+                if not isinstance(x.get("independent"), bool):
+                    bad.append(f"{r['id']}:出典に independent (true/false) が無い")
+                elif x["independent"] and wk and wk in text_key(x.get("publisher", "")).lower():
+                    bad.append(f"{r['id']}:発行元 {x.get('publisher')!r} は主張主体本人なのに independent=true")
+            if r.get("status") in BODY_STATUS and not independent_of(r) \
+                    and wk not in text_key(r.get("restated")).lower():
+                bad.append(f"{r['id']}:自己申告のみなのに restated が主張主体 ({who}) の言い分として書かれていない")
+        g("G17 vendor: 主張主体と出典の独立性 (自己申告のみの事実は主体を明示して書く)",
+          not bad, f"{bad[:8]}")
 
     print()
     if fails:

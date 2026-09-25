@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
-"""init_ledger.py — カンファレンス参加メモを決定的に「主張(claim)単位」へ切り出し、
+"""init_ledger.py — 参加メモ／資料メモを決定的に「主張(claim)単位」へ切り出し、
 裏取り台帳の骨格と 付録C(§6 入力一覧) を起こす。
+
+入力の種類 (--source-type):
+  conference  カンファレンス／学会／展示会の参加メモ (既定)
+  vendor      他社ソリューション資料 (製品説明・営業資料・ホワイトペーパー等)。
+              --materials に資料そのもの (pdf/txt/md) を渡し、ページ単位の本文を
+              work/materials/M#/p###.txt に抽出して manifest にハッシュで固定する。
+              資料を根拠にした PRIVATE_PRIMARY の引用は、check_report.py がこの
+              ページ本文で機械照合する (G5)。
 
 分類(事実/私見)も裏取りも、ここではしない。ここでやるのは
   * 入力の読み込みと正規化
@@ -15,6 +23,7 @@
 
 usage:
   python3 init_ledger.py <notes1.md> [<notes2.txt> ...] --stance <stance.md> --work <work>
+      [--source-type conference|vendor] [--subject "<名称>"] [--materials a.pdf b.pdf ...]
 """
 from __future__ import annotations
 
@@ -24,6 +33,8 @@ import hashlib
 import json
 import pathlib
 import re
+import shutil
+import subprocess
 import sys
 import unicodedata
 
@@ -39,13 +50,18 @@ MIN_SENT = 25  # これ未満の断片は直前の claim へ寄せる (粒度が
 LEDGER_FIELDS = {
     "kind": "",              # fact | opinion
     "kind_rationale": "",    # なぜその kind か (行ごとに固有の文)
+    "claimant": "",          # fact のみ: その主張の主体 (vendor モードでは必須。G17)
     "status": "",            # fact のみ: CONFIRMED|CORRECTED|PARTIAL|PRIVATE_PRIMARY|UNVERIFIED
     "restated": "",          # 裏取り後の事実としての言い直し (fact のみ / §1 事実編の本文はこれと逐語一致)
     "status_rationale": "",  # なぜその status か (行ごとに固有の文)
     "searched": {},          # UNVERIFIED のみ: {"queries": [...], "domains": [...]}
     "sources": [],           # 公開出典: [{"title","url","publisher","date","accessed","quote"}]
+                             #   vendor モードは各出典に "independent": true/false が必須
+                             #   (発行元が claimant 本人なら false = 自己申告。G17)
     "private_sources": [],   # 非公開の一次資料 (PRIVATE_PRIMARY のみ):
                              #   [{"document","page","classification","holder","quote"}]
+                             #   --materials で登録した資料なら "material": "M#" を付ける
+                             #   (page の本文に quote が実在するか G5 が照合する)
 }
 
 
@@ -145,6 +161,63 @@ def segment(text: str) -> list[dict]:
     return [c for c in out if c["text"]]
 
 
+SOURCE_TYPES = ("conference", "vendor")
+MATERIAL_EXT = (".pdf", ".txt", ".md")
+
+
+def material_pages(p: pathlib.Path) -> list[str]:
+    """資料 1 本 → ページごとの正規化テキスト。check 側もこれで再現・照合する。
+
+    PDF は pdftotext でページ単位に抜く (-layout なし: 引用照合は空白を潰して行うので
+    段組みより語順が素直な方が当たる)。txt/md は全体を 1 ページとして扱う。
+    テキスト層の無い (画像だけの) ページは空文字列のまま残す — そのページを根拠に
+    した引用は照合できないので、OCR した md を別資料として渡すこと。
+    """
+    ext = p.suffix.lower()
+    if ext not in MATERIAL_EXT:
+        die(f"material は {MATERIAL_EXT} のみ: {p}")
+    if ext != ".pdf":
+        return [norm(p.read_bytes().decode("utf-8"))]
+    if not shutil.which("pdftotext") or not shutil.which("pdfinfo"):
+        die("PDF 資料には pdftotext / pdfinfo (poppler-utils) が必要")
+    info = subprocess.run(["pdfinfo", str(p)], capture_output=True, text=True)
+    m = re.search(r"^Pages:\s+(\d+)", info.stdout, re.M)
+    if info.returncode != 0 or not m:
+        die(f"pdfinfo でページ数を読めない: {p}")
+    pages = []
+    for n in range(1, int(m.group(1)) + 1):
+        out = subprocess.run(["pdftotext", "-q", "-enc", "UTF-8", "-f", str(n), "-l", str(n),
+                              str(p), "-"], capture_output=True)
+        if out.returncode != 0:
+            die(f"pdftotext が失敗 ({p} p.{n})")
+        pages.append(norm(out.stdout.decode("utf-8", "replace")))
+    return pages
+
+
+def build_materials(paths: list[pathlib.Path]) -> tuple[list[dict], list[list[str]]]:
+    """資料パス列 → (manifest 用の記録, ページ本文)。ID は引数順に M1..Mn。"""
+    recs: list[dict] = []
+    texts: list[list[str]] = []
+    seen: dict[str, str] = {}
+    for i, p in enumerate(paths, 1):
+        if not p.is_file():
+            die(f"material not found: {p}")
+        sha = hashlib.sha256(p.read_bytes()).hexdigest()
+        if sha in seen:
+            die(f"{p} は {seen[sha]} と同一内容 — 重複資料は弾く")
+        seen[sha] = str(p)
+        pages = material_pages(p)
+        if not any(t.strip() for t in pages):
+            die(f"{p} からテキストが 1 文字も取れない (画像 PDF)。OCR した md を渡すこと")
+        recs.append({
+            "id": f"M{i}", "path": str(p), "sha256": sha, "pages": len(pages),
+            "empty_pages": [n for n, t in enumerate(pages, 1) if not t.strip()],
+            "pages_sha256": [hashlib.sha256(t.encode("utf-8")).hexdigest() for t in pages],
+        })
+        texts.append(pages)
+    return recs, texts
+
+
 def build_claims(paths: list[pathlib.Path]) -> tuple[list[dict], list[dict]]:
     """入力パス列 → (docs, claims)。check 側もこの関数で再現し照合する。"""
     docs: list[dict] = []
@@ -200,14 +273,22 @@ def main() -> None:
     ap.add_argument("notes", nargs="+", help="参加メモ (txt/md)。並べた順が N1..Nn")
     ap.add_argument("--stance", required=True, help="自分の立場を書いたファイル (txt/md)")
     ap.add_argument("--work", required=True)
-    ap.add_argument("--conference", default="", help="カンファレンス名 (付録C §6 に出す)")
+    ap.add_argument("--source-type", choices=SOURCE_TYPES, default="conference",
+                    help="conference=参加メモ (既定) / vendor=他社ソリューション資料")
+    ap.add_argument("--subject", "--conference", dest="subject", default="",
+                    help="対象の名称 (カンファレンス名 / ソリューション名。付録C §6 に出す)")
+    ap.add_argument("--materials", nargs="+", default=[],
+                    help="資料そのもの (pdf/txt/md)。並べた順が M1..Mn。vendor では必須")
     args = ap.parse_args()
+    if args.source_type == "vendor" and not args.materials:
+        die("--source-type vendor には --materials (資料そのもの) が必須 — "
+            "資料メモが資料を歪めていないかを照合する正本になる")
 
     work = pathlib.Path(args.work)
     work.mkdir(parents=True, exist_ok=True)
 
     # --- 何も書く前に既存生成物を検査する (裁定済み台帳を壊さない) -------------
-    for name in ("ledger.json", "claims.json", "manifest.json"):
+    for name in ("ledger.json", "claims.json", "manifest.json", "materials"):
         if (work / name).exists():
             die(
                 f"{work/name} already exists — 上書きすると裁定済みの内容が消える。"
@@ -224,6 +305,12 @@ def main() -> None:
 
     paths = [pathlib.Path(n) for n in args.notes]
     docs, claims = build_claims(paths)
+    mat_recs, mat_texts = build_materials([pathlib.Path(m) for m in args.materials])
+    for rec, pages in zip(mat_recs, mat_texts):
+        d = work / "materials" / rec["id"]
+        d.mkdir(parents=True, exist_ok=True)
+        for n, t in enumerate(pages, 1):
+            (d / f"p{n:03d}.txt").write_text(t, encoding="utf-8")
 
     claims_obj = {"docs": docs, "claims": claims}
     claims_bytes = json.dumps(claims_obj, ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -244,10 +331,11 @@ def main() -> None:
     (work / "stance.md").write_text(stance + "\n", encoding="utf-8")
 
     lines = ["## 6. 付録C. 入力と作成条件", ""]
-    if args.conference:
-        lines.append(f"- 対象カンファレンス: {args.conference}")
+    vendor = args.source_type == "vendor"
+    if args.subject:
+        lines.append(f"- {'対象ソリューション' if vendor else '対象カンファレンス'}: {args.subject}")
     lines += [
-        f"- 参加メモ: {len(docs)} 件 / 抽出 claim: {len(claims)} 件",
+        f"- {'資料メモ' if vendor else '参加メモ'}: {len(docs)} 件 / 抽出 claim: {len(claims)} 件",
         f"- 立場ファイル: `{stance_p}`",
         "",
         "| ID | ファイル | 文字量(byte) | claim 数 | sha256(raw, 先頭16) |",
@@ -257,6 +345,15 @@ def main() -> None:
         lines.append(
             f"| {d['id']} | `{d['path']}` | {d['bytes']} | {d['claims']} | `{d['raw_sha256'][:16]}` |"
         )
+    if mat_recs:
+        lines += [
+            "",
+            "| ID | 資料 | ページ数 | テキスト層なしページ | sha256(先頭16) |",
+            "| -- | ---- | -------- | -------------------- | -------------- |",
+        ]
+        for m in mat_recs:
+            empty = ",".join(map(str, m["empty_pages"])) or "—"
+            lines.append(f"| {m['id']} | `{m['path']}` | {m['pages']} | {empty} | `{m['sha256'][:16]}` |")
     lines += ["", "> 本節はスクリプト生成物 (`work/section0.md`)。件数は手で書かない。"]
     (work / "section0.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -264,7 +361,9 @@ def main() -> None:
         json.dumps(
             {
                 "generated": _dt.datetime.now().astimezone().isoformat(timespec="seconds"),
-                "conference": args.conference,
+                "source_type": args.source_type,
+                "conference": args.subject,
+                "materials": mat_recs,
                 "notes": [str(p) for p in paths],
                 "stance": str(stance_p),
                 "stance_raw_sha256": hashlib.sha256(stance_raw).hexdigest(),
@@ -279,7 +378,8 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    print(f"OK: {len(docs)} notes -> {len(claims)} claims")
+    print(f"OK: {len(docs)} notes -> {len(claims)} claims"
+          + (f" / {len(mat_recs)} materials" if mat_recs else "") + f" [{args.source_type}]")
     print(f"  {work/'claims.json'}\n  {work/'ledger.json'}\n  {work/'section0.md'}")
 
 
