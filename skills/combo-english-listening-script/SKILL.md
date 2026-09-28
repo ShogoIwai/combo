@@ -17,7 +17,7 @@ reached.
 | ---- | ------- |
 | **What it does** | 渡されたテーマに沿った場面（状況）を 1 つ決め、その場面の日本語会話（約1000文字）を書き、会話だけを自然な口語英語に訳して、3 つの md に分けて保存する。 |
 | **Input** | **テーマ**（skill の引数、または起動時のユーザー発言。必須）。出力先 `--work` は任意で、既定は CWD 直下の `work/`。 |
-| **type** | `one-shot` — 1 回の起動で 1 セット。既存の出力ディレクトリは上書きしない（同日・同テーマなら `_2`, `_3` … を付けて新規作成）。 |
+| **type** | `one-shot` — 1 回の起動で 1 セット。既存の出力ディレクトリは上書きしない（同日・同じ見出しなら `_2`, `_3` … を付けて新規作成）。 |
 | **Output** | `work/<slug>_<yymmdd>/` に `ja_situation.md`（テーマ＋状況）、`ja_conversation.md`（日本語会話）、`en_conversation.md`（英語会話）。 |
 | **goal** | 3 ファイルが存在し、`scripts/check_script.py` の 8 ゲートが全 PASS すること。 |
 | **Verification** | `python3 $S/scripts/check_script.py --dir <出力dir> --theme "<テーマ>"` が exit 0（exit 2 は入力不備）。 |
@@ -41,8 +41,11 @@ reached.
 
 1. **Fix the goal.** Task Summary の goal / Verification をこの run の唯一の完了条件として固定する。
 2. **Decide the output dir.** `<work>/<slug>_<yymmdd>/` を作る。`yymmdd` は当日、`slug` は
-   テーマを表す短い英小文字＋ハイフン（例: テーマ「空港」→ `airport_260928`）。既に存在すれば
-   末尾に `_2`, `_3` … を付けて新しく作る（例: `airport_260928_2`）。既存のファイルは上書きしない。
+   手順 3 で決める**場面を表す見出し**を短い英小文字＋ハイフンで書いたもの（2〜4 語。テーマの
+   英訳そのものにはしない。例: テーマ「空港」で乗り継ぎ便に遅れる場面 → `missed-connection_260928`、
+   テーマ「仕事」で提案書の締め切りを上司に相談する場面 → `proposal-deadline_260928`）。
+   場面を先に決めてからディレクトリ名を付ける。既に存在すれば
+   末尾に `_2`, `_3` … を付けて新しく作る（例: `missed-connection_260928_2`）。既存のファイルは上書きしない。
 3. **Write `ja_situation.md`（日本語の状況）.**
    ```
    # テーマ: <テーマ（ユーザーの入力そのまま）>
