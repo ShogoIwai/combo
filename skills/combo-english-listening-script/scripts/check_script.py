@@ -2,7 +2,7 @@
 """Gate checker for combo-english-listening-script outputs.
 
 Usage:
-  python3 check_script.py --file <work/<slug>_<yymmdd>.md> --theme "<テーマ>"
+  python3 check_script.py --file <work/english_<slug>_<yymmdd>.md> --theme "<テーマ>"
 
 Reads the single merged file, which holds three sections:
 "## 状況", "## 会話" (Japanese) and "## Conversation" (English).

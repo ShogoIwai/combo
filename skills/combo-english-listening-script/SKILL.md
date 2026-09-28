@@ -1,6 +1,6 @@
 ---
 name: combo-english-listening-script
-description: 英語リスニング兼音読トレーニング用のスクリプトを作る。skill 起動時に渡された「テーマ」に沿って、日本語の「状況」、約1000文字の日本語「会話」、その会話の英訳を、1 つの md にまとめて work/<slug>_<yymmdd>.md として work/ 直下に書き出す（サブディレクトリは作らない）。会話文には発言者ラベルやト書きを付けない。「英語リスニング用スクリプトを作って」「音読トレーニングのスクリプト」「リスニング練習の会話文を作って」「英会話スクリプト生成」「listening script」「shadowing script」等で起動。
+description: 英語リスニング兼音読トレーニング用のスクリプトを作る。skill 起動時に渡された「テーマ」に沿って、日本語の「状況」、約1000文字の日本語「会話」、その会話の英訳を、1 つの md にまとめて work/english_<slug>_<yymmdd>.md として work/ 直下に書き出す（サブディレクトリは作らない）。会話文には発言者ラベルやト書きを付けない。「英語リスニング用スクリプトを作って」「音読トレーニングのスクリプト」「リスニング練習の会話文を作って」「英会話スクリプト生成」「listening script」「shadowing script」等で起動。
 allowed-tools: Read, Write, Bash
 ---
 # combo-english-listening-script — テーマ → 日本語状況・日本語会話・英語会話を 1 本にまとめた md
@@ -18,7 +18,7 @@ reached.
 | **What it does** | 渡されたテーマに沿った場面（状況）を 1 つ決め、その場面の日本語会話（約1000文字）を書き、会話だけを自然な口語英語に訳して、3 要素を 1 つの md にまとめて保存する。 |
 | **Input** | **テーマ**（skill の引数、または起動時のユーザー発言。必須）。出力先 `--work` は任意で、既定は CWD 直下の `work/`。 |
 | **type** | `one-shot` — 1 回の起動で 1 セット。既存の出力ファイルは上書きしない（同日・同じ見出しなら `_2`, `_3` … を付けて新規作成）。 |
-| **Output** | `work/<slug>_<yymmdd>.md`（`work/` 直下の 1 ファイル。サブディレクトリは作らない）。中身はテーマ＋`## 状況`（日本語）・`## 会話`（日本語会話）・`## Conversation`（英語会話）の 3 セクション。 |
+| **Output** | `work/english_<slug>_<yymmdd>.md`（`work/` 直下の 1 ファイル。サブディレクトリは作らない）。中身はテーマ＋`## 状況`（日本語）・`## 会話`（日本語会話）・`## Conversation`（英語会話）の 3 セクション。 |
 | **goal** | 出力ファイルが存在し、`scripts/check_script.py` の 8 ゲートが全 PASS すること。 |
 | **Verification** | `python3 $S/scripts/check_script.py --file <出力md> --theme "<テーマ>"` が exit 0（exit 2 は入力不備: ファイル・セクション欠落）。 |
 | **loop limit** | 3（同じゲートで 2 回続けて FAIL したらその時点で打ち切り、`blocked` として報告する） |
@@ -40,13 +40,13 @@ reached.
 ## Procedure
 
 1. **Fix the goal.** Task Summary の goal / Verification をこの run の唯一の完了条件として固定する。
-2. **Decide the output file.** 出力は `<work>/<slug>_<yymmdd>.md`（`<work>` が無ければ作る。その下にサブディレクトリは作らない）。`yymmdd` は当日、`slug` は
+2. **Decide the output file.** 出力は `<work>/english_<slug>_<yymmdd>.md`（`<work>` が無ければ作る。その下にサブディレクトリは作らない）。`yymmdd` は当日、`slug` は
    手順 3 で決める**場面を表す見出し**を短い英小文字＋ハイフンで書いたもの（2〜4 語。テーマの
-   英訳そのものにはしない。例: テーマ「空港」で乗り継ぎ便に遅れる場面 → `missed-connection_260928`、
-   テーマ「仕事」で提案書の締め切りを上司に相談する場面 → `proposal-deadline_260928`）。
-   場面を先に決めてからファイル名を付ける（例: `work/proposal-deadline_260928.md`）。既に存在すれば
-   末尾に `_2`, `_3` … を付けて新しく作る（例: `work/missed-connection_260928_2.md`）。既存のファイルは上書きしない。
-3. **Write `<slug>_<yymmdd>.md`（3 要素をまとめた 1 ファイル）.** 次の構成で書く。見出しは表記どおり固定
+   英訳そのものにはしない。例: テーマ「空港」で乗り継ぎ便に遅れる場面 → `english_missed-connection_260928`、
+   テーマ「仕事」で提案書の締め切りを上司に相談する場面 → `english_proposal-deadline_260928`）。
+   場面を先に決めてからファイル名を付ける（例: `work/english_proposal-deadline_260928.md`）。既に存在すれば
+   末尾に `_2`, `_3` … を付けて新しく作る（例: `work/english_missed-connection_260928_2.md`）。既存のファイルは上書きしない。
+3. **Write `english_<slug>_<yymmdd>.md`（3 要素をまとめた 1 ファイル）.** 次の構成で書く。見出しは表記どおり固定
    （検査スクリプトが `## 状況` / `## 会話` / `## Conversation` でセクションを切り出す）。
    ```
    # テーマ: <テーマ（ユーザーの入力そのまま）>
@@ -119,7 +119,7 @@ reached.
 
 ## Output Contract
 
-- 出力は `<work>/<slug>_<yymmdd>.md` の 1 ファイルだけ。サブディレクトリや中間ファイルは作らない（`ja_situation.md` などに分割しない）。
+- 出力は `<work>/english_<slug>_<yymmdd>.md` の 1 ファイルだけ。サブディレクトリや中間ファイルは作らない（`ja_situation.md` などに分割しない）。
 - 既存のファイルは上書きしない。
 - 会話本文はチャットにも貼らない（ファイルを正本にする）。
 
