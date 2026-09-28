@@ -2,16 +2,19 @@
 """Gate checker for combo-english-listening-script outputs.
 
 Usage:
-  python3 check_script.py --dir <work/<slug>_<yymmdd>> --theme "<テーマ>"
+  python3 check_script.py --file <work/<slug>_<yymmdd>.md> --theme "<テーマ>"
 
-Exit 0 = all gates PASS, 1 = some gate FAIL, 2 = input error (missing dir/file).
+Reads the single merged file, which holds three sections:
+"## 状況", "## 会話" (Japanese) and "## Conversation" (English).
+
+Exit 0 = all gates PASS, 1 = some gate FAIL, 2 = input error (missing file/section).
 """
 import argparse
 import re
 import sys
 from pathlib import Path
 
-FILES = ("ja_situation.md", "ja_conversation.md", "en_conversation.md")
+SECTIONS = ("状況", "会話", "Conversation")
 JA_MIN, JA_MAX = 900, 1100
 
 JP_CHARS = re.compile(r"[぀-ヿ㐀-鿿！-～]")
@@ -33,24 +36,42 @@ def body_paragraphs(text):
     return paras
 
 
+def split_sections(text):
+    """Map each "## <name>" heading to the text up to the next "## " heading."""
+    out, name, buf = {}, None, []
+    for line in text.splitlines():
+        m = re.match(r"^##\s+(.+?)\s*$", line)
+        if m:
+            if name is not None:
+                out[name] = "\n".join(buf)
+            name, buf = m.group(1), []
+        elif name is not None:
+            buf.append(line)
+    if name is not None:
+        out[name] = "\n".join(buf)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dir", required=True)
+    ap.add_argument("--file", required=True)
     ap.add_argument("--theme", required=True)
     a = ap.parse_args()
 
-    d = Path(a.dir)
-    if not d.is_dir():
-        print(f"ERROR: {d} is not a directory", file=sys.stderr)
+    f = Path(a.file)
+    if not f.is_file():
+        print(f"ERROR: {f} is not a file", file=sys.stderr)
         return 2
-    missing = [f for f in FILES if not (d / f).is_file()]
+    text = f.read_text(encoding="utf-8")
+    secs = split_sections(text)
+    missing = [s for s in SECTIONS if s not in secs]
     if missing:
-        print(f"ERROR: missing {', '.join(missing)} in {d}", file=sys.stderr)
+        print(f"ERROR: missing section(s) {', '.join('## ' + s for s in missing)} in {f.name}",
+              file=sys.stderr)
         return 2
 
-    sit = (d / "ja_situation.md").read_text(encoding="utf-8")
-    ja = (d / "ja_conversation.md").read_text(encoding="utf-8")
-    en = (d / "en_conversation.md").read_text(encoding="utf-8")
+    title = text.split("\n## ", 1)[0]
+    sit, ja, en = secs["状況"], secs["会話"], secs["Conversation"]
     ja_p, en_p, sit_p = body_paragraphs(ja), body_paragraphs(en), body_paragraphs(sit)
 
     results = []
@@ -59,8 +80,8 @@ def main():
         results.append(ok)
         print(f"{'PASS' if ok else 'FAIL'} {name}{': ' + detail if detail else ''}")
 
-    # G1 theme is recorded verbatim in the situation file.
-    gate("G1 theme", a.theme.strip() in sit, f"'{a.theme}' in ja_situation.md")
+    # G1 theme is recorded verbatim in the title line.
+    gate("G1 theme", a.theme.strip() in title, f"'{a.theme}' in title of {f.name}")
 
     # G2 situation is non-empty Japanese prose.
     gate("G2 situation", bool(sit_p) and bool(JP_CHARS.search("".join(sit_p))),

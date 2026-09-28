@@ -19,10 +19,30 @@ reached.
 | **What it does** | 入力テキストを claim 単位に切り出し、1 件ずつ **F（事実）/ I（解釈）/ V（価値基準）** に裁定する。F は公開情報で裏取りし CONFIRMED / CORRECTED / PARTIAL / PRIVATE_PRIMARY / UNVERIFIED を付けて言い直す。I は「どの事実に乗っているか」と「同じ事実から出る別の解釈」を必ず持たせ、V は「軸・立場から来た由来・捨てるもの」を書かせる。その上で **E（表明）** として、意見・根拠・前提の価値基準・自分の行動・**この意見が変わる条件**を書く。 |
 | **Input** | 事実・解釈・価値観が混ざった自分のテキスト（txt/md）1 つ以上。立場ファイルは任意（既定 `reference/stance_default.md` = 日本人 / ASIC ベンダー勤務 / 妻と子の 3 人家族）。 |
 | **type** | `one-shot`（意見 md）＋ `incremental`（`work/ledger.json` の裁定、`work/evidence*` は追記・更新して残す） |
-| **Output** | 単一の `.md`（既定 `opinion_<topic>_<yymmdd>.md`）と、根拠となる `work/`（`claims.json` / `ledger.json` / `evidence.json` / `evidence/*.txt` / `section0.md` / `ledger_table.md` / `sources.md` / `stance.md`）。 |
+| **Output** | 1 run = 1 ディレクトリ `<base>/opinion_<slug>_<yymmdd>/`（`<base>` 既定は CWD 直下の `work/`）。その**中に**意見 md `opinion_<slug>_<yymmdd>.md`（ディレクトリ名と同名）と、根拠となる中間ファイル置き場 `work/`（`claims.json` / `ledger.json` / `evidence.json` / `evidence/*.txt` / `section0.md` / `ledger_table.md` / `sources.md` / `stance.md`）を置く。詳細は「出力レイアウト」。 |
 | **goal** | 出力 md が存在し、`scripts/check_opinion.py check` の 19 ゲートが全 PASS すること。 |
 | **Verification** | `python3 scripts/check_opinion.py check --report <out.md> --work <work> --inputs <src...> [--stance <stance.md>]` が exit 0（exit 2 は入力不備）。 |
 | **loop limit** | 3（= **台帳・md を直して再検証した回数**。HTTP の retry とは別物） |
+
+## 出力レイアウト
+
+1 回の起動で 1 つの出力ディレクトリ（以下 `<run>`）を作り、**意見 md も中間ファイルもすべてその中に**置く。
+`<run>` の外には何も書かない。
+
+```
+<base>/opinion_<slug>_<yymmdd>/            ← <run>（<base> 既定: CWD 直下の work/）
+├── opinion_<slug>_<yymmdd>.md             ← <out.md>: 意見 md（ディレクトリ名と同名）
+└── work/                                  ← <work>: 中間ファイル（init/fetch/report が書く）
+    ├── manifest.json  claims.json  ledger.json  stance.md  section0.md
+    ├── evidence.json  evidence/*.txt
+    └── ledger_table.md  sources.md
+```
+
+- `yymmdd` は当日、`slug` はお題を表す短い英小文字＋ハイフン（2〜4 語。例: お題「生成 AI の
+  社内導入」→ `opinion_genai-adoption_260928`）。
+- 同名の `<run>` が既にあれば末尾に `_2`, `_3` … を付けて新しく作る（md 名も同じ名前に揃える。
+  例: `opinion_genai-adoption_260928_2/opinion_genai-adoption_260928_2.md`）。既存の run は上書きしない。
+- 以下の手順・コマンドの `<work>` は常に `<run>/work`、`<out.md>` は常に `<run>/<run名>.md` を指す。
 
 ## FIVE フレームワークとは
 
@@ -69,7 +89,7 @@ reached.
    立場を差し替えるなら `reference/stance_default.md` をコピーして編集し `--stance` で渡す
    （既定のままでも動く）。差し替える場合、`## 検査用アンカー` に**自分の立場を名指しする語を
    2 件以上**残すこと（一般語を入れると G8/G13 が空回りする）。無いと init が止まる。
-3. **Segment（決定的）.**
+3. **Segment（決定的）.** 先に「出力レイアウト」に従って `<run>` を決める（`<work>` = `<run>/work` は init が作る）。
    ```bash
    python3 scripts/init_opinion.py <input.md> [...] --work <work> --topic "<お題>"
    #   立場を差し替えるなら: --stance <stance.md>
@@ -118,7 +138,7 @@ reached.
    python3 scripts/check_opinion.py report --work <work>
    ```
    `ledger_table.md` / `sources.md` が出る。**件数はここでしか作らない。**
-7. **Write the opinion.** `reference/opinion_template.md` の章立てで 1 本の md を書く。
+7. **Write the opinion.** `reference/opinion_template.md` の章立てで 1 本の md を **`<run>/<run名>.md`** に書く（`<work>` の中や `<run>` の外には置かない）。
    - §0 は地の文 120 字以上。読み分け（F/I/V/E/未確認）と立場を明示する。
    - §1 は `###` テーマ配下に**地の文で**。裏取り済み fact は全件本文に現れ、その記述に
      `restated` を逐語で含め `[C#]` を添える（1 記述に CID は 3 個まで）。
@@ -195,7 +215,8 @@ md を書く主体が同じなので、網羅を機械で見ても独立性は�
 
 ## Output Contract
 
-- 意見は**単一 md**。`work/`（証跡込み）は残す（消さない）。
+- 意見は**単一 md** で、`<run>/<run名>.md` に置く。中間ファイルは `<run>/work/` に置き、証跡込みで残す（消さない）。
+  `<run>` の外には書かない。
 - F（§1）・I（§2）・V（§3）・E（§4）・未確認（付録A）は**必ず別の節**。
   読み手が節を見ただけで「事実なのか、あなたの価値観なのか」が分かること。
 - §1 の全記述は台帳 ID で 付録D へ、付録D は URL で 付録E へ、付録E は `evidence.json` で
@@ -209,7 +230,7 @@ md を書く主体が同じなので、網羅を機械で見ても独立性は�
 
 完了時に次を報告する。
 
-- 出力 md のパス、`work/` のパス
+- `<run>` のパス（意見 md `<run>/<run名>.md` と中間ファイル `<run>/work/`）
 - `check_opinion.py check` の最終行（PASS/FAIL とゲート名）
 - **CORRECTED になった claim**（自分の認識が公開情報と違っていた箇所）— 最も価値の高い差分
 - **fact だと思っていたが value / interpretation だった claim** — 2 番目に価値の高い差分
