@@ -242,6 +242,39 @@ Both servers share the same shape of knobs (`CODEX_*` / `CLAUDE_*`):
 | `CODEX_FORK_TIMEOUT`       | `CLAUDE_FORK_TIMEOUT`        | `1800`                    | Per-fork wall-clock cap (seconds)    |
 | `CODEX_FORK_USAGE_LOG`     | `CLAUDE_FORK_USAGE_LOG`      | `combo/usage_*.log`       | JSONL usage log path                 |
 
+### MCP client timeout (Codex → Claude)
+
+The fork timeout above limits the child process. The MCP client has a separate
+timeout for waiting for the tool response. Set it slightly longer than the
+server's `1800` seconds so a long review can finish or return the server's
+timeout error.
+
+After registering `claude`, add `tool_timeout_sec` to its **existing** section in
+`~/.codex/config.toml` (keep any existing tool approval settings):
+
+```toml
+[mcp_servers.claude]
+command = "python3"
+args = ["/mnt/hdd/edgeai/rep/combo/mcp_claude.py"] # use your launch-root path
+tool_timeout_sec = 1860 # 31 minutes; child process limit is 30 minutes
+```
+
+Restart Codex after changing this setting. If `CLAUDE_FORK_TIMEOUT` is increased,
+increase `tool_timeout_sec` as well. `startup_timeout_sec` controls server startup
+and does not extend a running tool call. See the
+[official Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+
+On 2026-09-30, a review call failed on the client with
+`timed out awaiting tools/call after 300s`, while `usage_claude.log` recorded the
+child completing successfully in `334.078s` (`rc=0`). Both Python servers already
+used `subprocess.run(timeout=1800)`; changing their fork limit would not fix that
+client timeout. The `1860`-second client setting was applied, Codex was restarted,
+and the review was then received successfully.
+
+The usage logs record the child process outcome, not whether the caller received
+the response. They also do not store the response body, so an `rc=0` entry alone
+cannot recover a result lost after a client timeout.
+
 ---
 
 ## Monitoring the traffic
