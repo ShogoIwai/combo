@@ -3,11 +3,15 @@
 
 Usage:
   python3 check_script.py --file <work/english_<slug>_<yymmdd>.md> --theme "<テーマ>"
+      [--source <opinion_<slug>_<yymmdd>.md>]   # combo-opinion-five output used as material
 
 Reads the single merged file, which holds three sections:
 "## 状況", "## 会話" (Japanese) and "## Conversation" (English).
 
-Exit 0 = all gates PASS, 1 = some gate FAIL, 2 = input error (missing file/section).
+With --source, gate G9 also checks that the material is recorded in the title
+block ("素材: <path>") and that no ledger IDs ([C12] etc.) leaked into the talk.
+
+Exit 0 = all gates PASS, 1 = some gate FAIL, 2 = input error (missing file/section/source).
 """
 import argparse
 import re
@@ -24,6 +28,9 @@ EN_LABEL = re.compile(r"^\s*(?:\[[^\]]{1,20}\]|[A-Z][A-Za-z .'-]{0,20}:\s)")
 # Stage directions / supplements in brackets.
 JA_STAGE = re.compile(r"[（(][^）)]*[）)]")
 EN_STAGE = re.compile(r"\([^)]*\)|\[[^\]]*\]|\*[^*]+\*")
+# combo-opinion-five ledger IDs (C1, [C12], ［C3］) must not leak into the conversation.
+CID = re.compile(r"(?<![A-Za-z0-9])[CＣ][0-9０-９]+(?![A-Za-z0-9])")
+SOURCE_LINE = re.compile(r"^素材[:：]\s*(.+?)\s*$", re.M)
 
 
 def body_paragraphs(text):
@@ -56,11 +63,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--file", required=True)
     ap.add_argument("--theme", required=True)
+    ap.add_argument("--source", help="combo-opinion-five opinion md used as material")
     a = ap.parse_args()
 
     f = Path(a.file)
     if not f.is_file():
         print(f"ERROR: {f} is not a file", file=sys.stderr)
+        return 2
+    if a.source and not Path(a.source).is_file():
+        print(f"ERROR: source {a.source} is not a file", file=sys.stderr)
         return 2
     text = f.read_text(encoding="utf-8")
     secs = split_sections(text)
@@ -108,6 +119,15 @@ def main():
 
     # G8 utterance-by-utterance alignment between ja and en.
     gate("G8 ja/en aligned", len(ja_p) == len(en_p), f"ja={len(ja_p)} en={len(en_p)}")
+
+    # G9 (only with --source) material is recorded and its notation stays out of the talk.
+    if a.source:
+        m = SOURCE_LINE.search(title)
+        recorded = bool(m) and Path(m.group(1).strip("`")).name == Path(a.source).name
+        leaked = [p.splitlines()[0][:30] for p in ja_p + en_p if CID.search(p)]
+        gate("G9 source", recorded and not leaked,
+             ("素材: line ok" if recorded else f"no '素材: ...{Path(a.source).name}' line in title block")
+             + ("; ledger ID in: " + "; ".join(leaked[:3]) if leaked else ""))
 
     ok = all(results)
     print(f"{'PASS' if ok else 'FAIL'} {sum(results)}/{len(results)} gates")
