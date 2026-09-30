@@ -255,7 +255,7 @@ After registering `claude`, add `tool_timeout_sec` to its **existing** section i
 ```toml
 [mcp_servers.claude]
 command = "python3"
-args = ["/mnt/hdd/edgeai/rep/combo/mcp_claude.py"] # use your launch-root path
+args = ["<launch-root>/combo/mcp_claude.py"] # replace <launch-root> with its absolute path
 tool_timeout_sec = 1860 # 31 minutes; child process limit is 30 minutes
 ```
 
