@@ -1,8 +1,8 @@
 ---
-name: combo-md-to-pdf
+name: combo-fileconv-md-to-pdf
 description: Convert Markdown (.md) files to PDF with correct Japanese, code blocks and tables via md-to-pdf (Chromium rendering, no LaTeX). Triggers on "mdをPDF化", "markdown to pdf", "md→pdf", "PDFに変換".
 ---
-# combo-md-to-pdf — convert Markdown to PDF
+# combo-fileconv-md-to-pdf — convert Markdown to PDF
 
 One task = one goal. The goal is verified before the task is reported as
 complete; if it is not met, the task loops until it is met or the loop limit is
@@ -15,11 +15,11 @@ reached.
 | Item                     | Content                                                                                                                                    |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | **What it does**   | Renders one or more `.md` files to PDF with **md-to-pdf** (Puppeteer/headless Chromium), so Japanese text, code blocks, tables and emoji come out correctly without a LaTeX toolchain. |
-| **Input**          | One or more readable `.md` files; optional explicit output path; optional `PDF_OPTIONS` JSON. See **Prerequisites** for the tools needed.  |
+| **Input**          | One or more readable `.md` files; optional explicit output path; optional `PDF_OPTIONS` JSON; optional `--mermaid` (draw ```mermaid blocks as diagrams). See **Prerequisites** for the tools needed.  |
 | **type**                 | `one-shot` — each PDF is fully re-rendered from its Markdown source on every run and overwritten in place; an existing PDF is never used as a source. |
 | **Output**         | One `.pdf` per input file — the explicit output path if given, otherwise the input basename with `.pdf` in the same directory.            |
 | **goal**           | Every requested PDF exists, is a valid non-empty PDF with at least one page, and renders the constructs its source actually contains — Japanese text without tofu, and code blocks and tables intact. |
-| **Verification**         | Run `convert.sh`; exit code must be 0. For each output: the file exists, is non-empty, starts with the `%PDF-` magic bytes, and `pdfinfo` reports >= 1 page. Then, **only for the constructs present in that source**, extract text with `pdftotext` and confirm the Japanese runs, the code-block text and the table cell text all survive; inspect the rendered page visually when layout or glyph coverage is in doubt, since text extraction cannot detect tofu or broken table borders. Confirm one PDF was produced per input file. |
+| **Verification**         | Run `convert.sh`; exit code must be 0. Then run `md_pdf_qa.py <input.md> <output.pdf> [--mermaid]` (exit 0 required) and **open every contact sheet it lists** (LOOK lines) to check for clipped diagrams, overflowing tables and broken glyphs — text checks cannot see those. For each output: the file exists, is non-empty, starts with the `%PDF-` magic bytes, and `pdfinfo` reports >= 1 page. Then, **only for the constructs present in that source**, extract text with `pdftotext` and confirm the Japanese runs, the code-block text and the table cell text all survive; inspect the rendered page visually when layout or glyph coverage is in doubt, since text extraction cannot detect tofu or broken table borders. Confirm one PDF was produced per input file. |
 | **loop limit** | 3                                                                                                                                          |
 
 ## When to Use
@@ -48,23 +48,44 @@ npx puppeteer browsers install chrome   # one-time Chromium download
 
 ```bash
 # Single file  -> input.pdf (same directory)
-<launch-root>/combo/skills/combo-md-to-pdf/convert.sh input.md
+<launch-root>/combo/skills/combo-fileconv-md-to-pdf/convert.sh input.md
 
 # Explicit output name
-<launch-root>/combo/skills/combo-md-to-pdf/convert.sh input.md out/report.pdf
+<launch-root>/combo/skills/combo-fileconv-md-to-pdf/convert.sh input.md out/report.pdf
 
 # Batch: each file -> same-name .pdf
-<launch-root>/combo/skills/combo-md-to-pdf/convert.sh docs/*.md
+<launch-root>/combo/skills/combo-fileconv-md-to-pdf/convert.sh docs/*.md
 
 # Override page/margin options (JSON, passed to md-to-pdf --pdf-options)
 PDF_OPTIONS='{"format":"A4","margin":"15mm"}' \
-  <launch-root>/combo/skills/combo-md-to-pdf/convert.sh input.md
+  <launch-root>/combo/skills/combo-fileconv-md-to-pdf/convert.sh input.md
 ```
 
 `--pdf-options` is **always** passed to md-to-pdf. When `PDF_OPTIONS` is not
 set, `convert.sh` applies a default of `{"format":"A4","margin":"15mm"}`; set the
 env var to override it. Call the CLI directly with `md-to-pdf input.md` only if
 you deliberately want md-to-pdf's own defaults.
+
+## Diagrams and visual QA
+
+```bash
+T=<launch-root>/combo/skills/combo-fileconv-md-to-pdf
+$T/convert.sh --mermaid input.md out.pdf          # mermaid blocks -> inline SVG (mmdc)
+python3 $T/md_pdf_qa.py input.md out.pdf --mermaid  # checks + contact sheets
+```
+
+- `--mermaid` renders all blocks in one `mmdc` run (`npm install -g
+  @mermaid-js/mermaid-cli`) and inlines each SVG with its own id, so labels stay
+  text in the PDF. A block that does not parse fails the run with its line
+  number; there is no silent fallback to code. Without the flag the blocks are
+  printed as code, as before.
+- `md_pdf_qa.py` checks headings, code blocks, table headers and diagram
+  labels against the PDF text, and that a CJK font is embedded when the source
+  has Japanese (in prose, code or diagrams) and embedded, and fails when a
+  linked local image is not matched one-to-one to an embedded image of its
+  size and look, when `--mermaid` was claimed but a diagram's source is in the
+  text, or when a page could not be rasterized. It clears old sheets and writes contact sheets of every page (8 per image) and the
+  approximate page of each diagram and wide table as hints.
 
 ## Procedure
 
@@ -103,3 +124,19 @@ you deliberately want md-to-pdf's own defaults.
   two-file batch whose second input is named `*.pdf` cannot be expressed.
 - Exit codes: missing `md-to-pdf` exits 1, no arguments exits 2; conversion,
   `mkdir` and `mv` errors propagate under `set -e`.
+- Each md-to-pdf run is killed after `MD2PDF_TIMEOUT` seconds (default 300;
+  exit 124). md-to-pdf reads stdin even when given a file, so `convert.sh`
+  feeds it `/dev/null`: before, piped input replaced the file and an open,
+  never-closed stdin hung the run.
+- `convert.sh` renders a staged copy in a private temporary directory
+  (`$TMPDIR/md2pdf.XXXXXX`, removed afterwards) whose local images — inline,
+  reference-style (`![a][ref]`), `<angle bracket>` paths and `<img src>` — are
+  inlined as `data:` URIs, and passes that directory as md-to-pdf's
+  `--basedir`. md-to-pdf serves `--basedir` over a local HTTP server, so only
+  the staged copy is ever served (a `../..` link cannot expose the file
+  system), nothing is written beside the source (a read-only source directory
+  works, an existing `<name>.pdf` there is not touched), and relative images no
+  longer depend on the current directory. A missing image is a warning from
+  the staging step and a FAIL in `md_pdf_qa.py`. Code fences follow CommonMark
+  (indented up to 3 spaces, ``` or ~~~, closed by a fence at least as long),
+  so a Mermaid example inside a longer fence stays an example.

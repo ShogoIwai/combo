@@ -55,7 +55,7 @@ reached.
 4. **別モデルへの経路**（`mcp__codex__ask_codex` 等）。手順 8 の反証レビューは G15 で必須
 5. **立場ファイル**が空でないこと（誰に向けた考察かが決まらないと §2 の考察が書けない）
 6. **（vendor）pdftotext / pdfinfo**（資料 PDF をページ単位で固定・照合する）。画像だけの PDF は
-   テキストが取れないので、OCR した md（`combo-pdf-to-md` 等）を資料として渡す
+   テキストが取れないので、OCR した md（`combo-fileconv-pdf-to-md` 等）を資料として渡す
 
 2〜4 のいずれかが無い環境では goal を満たせない。着手せず `blocked` で報告する（`failed` ではない）。
 

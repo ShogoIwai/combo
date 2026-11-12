@@ -35,7 +35,7 @@ reached.
 1. **python3**
 2. **pdftotext**（poppler-utils）— 無ければ `Error:` で停止する
 3. 入力 PDF が**テキストレイヤを持つ**こと。スキャン画像 PDF は本 skill の対象外
-   （`combo-docx-to-md` / OCR 経路で先にテキスト化してから渡す）
+   （`combo-fileconv-docx-to-md` / OCR 経路で先にテキスト化してから渡す）
 
 ## Procedure
 

@@ -24,7 +24,7 @@ description: Notion の任意のページを Markdown ファイルに変換す�
 ## 使いどころ
 
 - Notion の設計メモ・議事録をリポジトリへ取り込んで grep/レビュー対象にする
-- 下流の text-only スキル（`combo-md-to-pdf`、各種レビュー skill）へ渡す前段
+- 下流の text-only スキル（`combo-fileconv-md-to-pdf`、各種レビュー skill）へ渡す前段
 
 ## 前提（どの MCP を使うか）
 

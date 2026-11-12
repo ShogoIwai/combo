@@ -2,10 +2,11 @@
 # convert.sh — Convert .docx to markdown with optional OCR for embedded images.
 #
 # Usage:
-#   ./convert.sh <input.docx> [output.md] [--ocr]
+#   ./convert.sh <input.docx> [output.md] [--ocr] [--records out.jsonl]
 #
 # Options:
-#   --ocr    Enable OCR for embedded images (requires Ollama + glm-ocr)
+#   --ocr              Enable OCR for embedded images (requires Ollama + glm-ocr)
+#   --records FILE     Also write source-addressed records (JSONL) for consistency checks
 #
 # Requires:
 #   - python-docx (pip install python-docx)
@@ -21,13 +22,17 @@ OCR_TO_MD="${OCR_TO_MD:-$SCRIPT_DIR/../../../ollama/ocr_to_md.sh}"
 INPUT=""
 OUTPUT=""
 ENABLE_OCR=0
+RECORDS=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         --ocr) ENABLE_OCR=1; shift ;;
+        --records)
+            [[ -n "${2-}" && "${2-}" != --* ]] || { echo "Error: --records requires a file path" >&2; exit 1; }
+            RECORDS="$2"; shift 2 ;;
         --help|-h)
-            echo "Usage: $0 <input.docx> [output.md] [--ocr]"
+            echo "Usage: $0 <input.docx> [output.md] [--ocr] [--records out.jsonl]"
             exit 0
             ;;
         *)
@@ -63,62 +68,9 @@ echo ""
 # Step 1: Extract text using python-docx
 echo "[Step 1/3] Extracting text with python-docx..."
 
-python3 -c "
-from docx import Document
-import re
-import sys
-
-def get_heading_level(para):
-    style_name = para.style.name if para.style else ''
-    match = re.match(r'toc\s+(\d+)', style_name, re.IGNORECASE)
-    if match: return int(match.group(1))
-    match = re.match(r'heading\s+(\d+)', style_name, re.IGNORECASE)
-    if match: return int(match.group(1))
-    return None
-
-def heading_to_md(text, level):
-    prefix = '#' * min(level, 6)
-    return f'{prefix} {text}\n\n'
-
-def table_to_md(table):
-    lines = []
-    for i, row in enumerate(table.rows):
-        cells = [cell.text.strip() for cell in row.cells]
-        if i == 0:
-            lines.append('| ' + ' | '.join(cells) + ' |')
-            lines.append('| ' + ' | '.join(['---'] * len(cells)) + ' |')
-        else:
-            lines.append('| ' + ' | '.join(cells) + ' |')
-    return '\n'.join(lines) + '\n\n'
-
-doc = Document(sys.argv[1])
-output_lines = []
-skip_next_empty = False
-
-for para in doc.paragraphs:
-    style_name = para.style.name if para.style else ''
-    text = para.text.strip()
-    level = get_heading_level(para)
-
-    if level is not None and text:
-        output_lines.append(heading_to_md(text, level))
-        skip_next_empty = False
-    elif text:
-        if text.startswith('•') or text.startswith('-'):
-            output_lines.append(f'{text}\n\n')
-        else:
-            output_lines.append(f'{text}\n\n')
-        skip_next_empty = False
-    elif not skip_next_empty and style_name == 'Normal':
-        skip_next_empty = True
-
-# Add tables
-for table in doc.tables:
-    output_lines.append(table_to_md(table))
-
-md_content = ''.join(output_lines).rstrip() + '\n'
-sys.stdout.write(md_content)
-" "$INPUT" > "${OUTPUT%.md}_temp.md" 2>/dev/null
+# Body walk in document order (see docx_to_md.py for the text/heading rules).
+# stderr is left visible so a python-docx exception shows up in the log.
+python3 "$SCRIPT_DIR/docx_to_md.py" "$INPUT" "${OUTPUT%.md}_temp.md" ${RECORDS:+--records "$RECORDS"}
 
 echo "  → Text extraction complete ($(wc -l < "${OUTPUT%.md}_temp.md") lines)"
 
@@ -142,7 +94,7 @@ if [[ $ENABLE_OCR -eq 1 ]]; then
         [[ -f "${emf%.emf}.png" ]] || echo "  Warning: EMF→PNG conversion failed for $(basename "$emf"); figure skipped." >&2
     done
 
-    PNG_COUNT=$(find "$WORKDIR" -name "*.png" | wc -l)
+    PNG_COUNT=$(find "$WORKDIR" \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" \) | wc -l)
     echo "  → Extracted $PNG_COUNT images to $WORKDIR"
 
     # Step 3: OCR each image
@@ -155,11 +107,11 @@ if [[ $ENABLE_OCR -eq 1 ]]; then
        curl -fsS --max-time 3 "${OLLAMA_HOST:-http://localhost:11434}/api/tags" 2>/dev/null | \
        jq -e --arg m "${OCR_MODEL:-glm-ocr:bf16}" '.models[]?.name | select(. == $m)' > /dev/null 2>&1; then
         N=0
-        TOTAL=$(find "$WORKDIR" -name "*.png" | wc -l)
+        TOTAL=$(find "$WORKDIR" \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" \) | wc -l)
 
         while IFS= read -r -d '' img; do
             N=$((N + 1))
-            BASENAME=$(basename "$img" .png)
+            BASENAME=$(basename "$img")
             OCR_OUTPUT="$WORKDIR/ocr_${BASENAME}.md"
 
             echo "  [${N}/${TOTAL}] OCR: $img" >&2
@@ -171,7 +123,7 @@ if [[ $ENABLE_OCR -eq 1 ]]; then
                 rm -f "$OCR_OUTPUT"
                 echo "  Warning: OCR produced no text for $(basename "$img")" >&2
             fi
-        done < <(find "$WORKDIR" -name "*.png" -print0 | sort -z)
+        done < <(find "$WORKDIR" \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" \) -print0 | sort -z)
 
         OCR_FILE_COUNT=$(find "$WORKDIR" -maxdepth 1 -name "ocr_*.md" 2>/dev/null | wc -l)
         if [[ $OCR_FILE_COUNT -eq 0 ]]; then

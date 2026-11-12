@@ -56,6 +56,7 @@ The whole design rests on five facts about this environment:
 | `link_skills.sh`   | Idempotent bootstrap that symlinks each `combo/skills/<name>` into each harness's **user-global** search path (`~/.claude/skills`, `~/.agents/skills`).                                          |
 | `skills/`          | **Shared skills** source of truth — one dir per skill (`combo-<name>/SKILL.md`), symlinked into both harnesses (see[Skill sharing across both harnesses](#skill-sharing-across-both-harnesses)). |
 | `hooks/`           | **Claude Code hook** scripts (`stop_rg_cleanup.sh`, `session_end_cleanup.sh`) called from `~/.claude/settings.json` (see [Claude Code hooks](#claude-code-hooks-combohooks)).                 |
+| `tests/fileconv/` | Regression checks for `skills/combo-fileconv-*` (`run_regression.py` over a local, gitignored corpus; `corpus.example.tsv` shows the format); compatibility policy and acceptance criteria in its `README.md`. |
 
 ### Dependency
 

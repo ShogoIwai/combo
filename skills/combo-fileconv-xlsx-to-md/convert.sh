@@ -2,11 +2,12 @@
 # convert.sh — Convert .xlsx / .xls spreadsheets to Markdown tables.
 #
 # Usage:
-#   ./convert.sh <input.xlsx> [output.md] [--list-sheets] [--ocr]
+#   ./convert.sh <input.xlsx> [output.md] [--list-sheets] [--ocr] [--records out.jsonl]
 #
 # Options:
 #   --list-sheets    List sheet names and exit (no conversion)
 #   --ocr            Enable OCR for embedded images (requires Ollama + glm-ocr)
+#   --records FILE   Also write source-addressed cell/shape records (JSONL; .xlsx/.xlsm only)
 #
 # Requires:
 #   - openpyxl (pip install openpyxl) — for .xlsx files
@@ -24,14 +25,18 @@ INPUT=""
 OUTPUT=""
 LIST_SHEETS=0
 ENABLE_OCR=0
+RECORDS=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         --list-sheets) LIST_SHEETS=1; shift ;;
         --ocr)         ENABLE_OCR=1; shift ;;
+        --records)
+            [[ -n "${2-}" && "${2-}" != --* ]] || { echo "Error: --records requires a file path" >&2; exit 1; }
+            RECORDS="$2"; shift 2 ;;
         --help|-h)
-            echo "Usage: $0 <input.xlsx> [output.md] [--list-sheets] [--ocr]"
+            echo "Usage: $0 <input.xlsx> [output.md] [--list-sheets] [--ocr] [--records out.jsonl]"
             exit 0
             ;;
         *)
@@ -74,139 +79,7 @@ echo ""
 # Step 1: Extract text using openpyxl/xlrd
 echo "[Step 1/3] Converting sheets to Markdown..."
 
-python3 -c "
-import sys
-import os
-
-try:
-    import openpyxl as _xl
-    HAS_OPENPYXL = True
-except ImportError:
-    HAS_OPENPYXL = False
-
-try:
-    import xlrd as _xr
-    HAS_XLRD = True
-except ImportError:
-    HAS_XLRD = False
-
-input_path  = sys.argv[1]
-output_path = sys.argv[2] if len(sys.argv) > 2 else ''
-list_only   = sys.argv[3] == '1' if len(sys.argv) > 3 else False
-
-ext = os.path.splitext(input_path)[1].lower()
-
-if ext in ('.xlsx', '.xlsm'):
-    if not HAS_OPENPYXL:
-        print('Error: openpyxl is required for .xlsx files.', file=sys.stderr)
-        sys.exit(1)
-elif ext == '.xls':
-    if not HAS_XLRD:
-        print('Error: xlrd is required for legacy .xls files.', file=sys.stderr)
-        sys.exit(1)
-else:
-    if not HAS_OPENPYXL and not HAS_XLRD:
-        print('Error: neither openpyxl nor xlrd is installed.', file=sys.stderr)
-        sys.exit(1)
-
-# USE_OPENPYXL tracks which library actually opened this workbook. It must not
-# be confused with HAS_OPENPYXL (merely: openpyxl is importable). A legacy .xls
-# is always read with xlrd, even on a machine that also has openpyxl installed.
-if ext in ('.xlsx', '.xlsm') and HAS_OPENPYXL:
-    wb = _xl.load_workbook(input_path, read_only=True, data_only=True)
-    USE_OPENPYXL = True
-elif HAS_XLRD:
-    wb = _xr.open_workbook(input_path)
-    USE_OPENPYXL = False
-elif HAS_OPENPYXL:
-    wb = _xl.load_workbook(input_path, read_only=True, data_only=True)
-    USE_OPENPYXL = True
-else:
-    print('Error: unsupported format.', file=sys.stderr)
-    sys.exit(1)
-
-def is_blank(v):
-    # openpyxl yields None for an empty cell; str(None) is 'None', so None must
-    # be tested before falling back to the string form.
-    return v is None or str(v).strip() == ''
-
-def trim_cells(rows):
-    trimmed = []
-    for row in rows:
-        r = list(row)
-        while r and is_blank(r[-1]):
-            r.pop()
-        if r:
-            trimmed.append(r)
-    while trimmed and all(is_blank(c) for c in trimmed[-1]):
-        trimmed.pop()
-    return trimmed
-
-def rows_to_md(rows):
-    if not rows:
-        return ''
-    ncols = max(len(r) for r in rows)
-    lines = []
-    for i, row in enumerate(rows):
-        # Replace newlines inside cells so each table row stays on one line.
-        # Markdown renderers that support HTML (<br>) will display them;
-        # plain-text viewers see the literal <br>, which is still readable.
-        NL = chr(10)   # newline
-        BS = chr(92)   # backslash
-        cells = []
-        for c in row:
-            s = str(c) if c is not None else ''
-            s = s.replace(BS, BS+BS)       # backslash → double backslash (for | escape)
-            s = s.replace('|', BS+'|')     # pipe chars
-            s = s.replace(NL, '<br>')      # newlines → <br>
-            cells.append(s.strip())
-        while len(cells) < ncols:
-            cells.append('')
-        lines.append('| ' + ' | '.join(cells) + ' |')
-        if i == 0:
-            lines.append('| ' + ' | '.join(['---'] * ncols) + ' |')
-    return '\n'.join(lines) + '\n\n'
-
-sheet_names = list(wb.sheetnames) if USE_OPENPYXL else list(wb.sheet_names())
-
-if list_only:
-    for name in sheet_names:
-        print(name)
-    sys.exit(0)
-
-md_lines = [f'# {os.path.basename(input_path)}\n\n']
-
-for sname in sheet_names:
-    try:
-        if USE_OPENPYXL:
-            ws = wb[sname]
-            rows_raw = list(ws.iter_rows(values_only=True))
-        else:
-            ws = wb.sheet_by_name(sname)
-            rows_raw = [[ws.cell_value(r, c) for c in range(ws.ncols)] for r in range(ws.nrows)]
-    except Exception as e:
-        print(f'Warning: could not read sheet \"{sname}\": {e}', file=sys.stderr)
-        continue
-
-    rows = trim_cells(rows_raw)
-    if not rows:
-        print(f'Skipping empty sheet: {sname}', file=sys.stderr)
-        continue
-
-    md_lines.append(f'## {sname}\n\n')
-    md_lines.append(rows_to_md(rows))
-    md_lines.append('---\n\n')
-
-output_text = ''.join(md_lines).rstrip() + '\n'
-
-if output_path:
-    if os.path.dirname(output_path):
-        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(output_text)
-else:
-    sys.stdout.write(output_text)
-" "$INPUT" "${OUTPUT%.md}_temp.md" "$LIST_SHEETS"
+python3 "$SCRIPT_DIR/xlsx_to_md.py" "$INPUT" "${OUTPUT%.md}_temp.md" "$LIST_SHEETS" "$RECORDS"
 
 # --list-sheets prints names to stdout and writes no temp file; stop here.
 [[ $LIST_SHEETS -eq 1 ]] && exit 0

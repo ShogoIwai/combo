@@ -1,0 +1,12 @@
+# Regression corpus for combo-fileconv-* (run_regression.py) — format example.
+# Copy to corpus.local.tsv (gitignored) and list real documents there; their
+# names and locations are local information and are never committed.
+# Paths are relative to <launch-root>; options are passed to the converter.
+# kind	path	options	why this file is here
+docx	docs/spec/module_design_spec.docx		TOC, tables interleaved with body text, custom heading styles
+docx	docs/review/review_note.docx		tracked changes (most text inside w:ins)
+xlsx	docs/spec/flowchart_sheet.xlsx		grid-paper sheet with a shape flowchart
+xlsx	docs/spec/register_list.xlsx		comments, merged cells, several sheets
+pdf	docs/vendor/register_manual.pdf	--pages 1-20	register tables
+pdf	docs/vendor/kickoff_slides.pdf		slides with almost no text layer
+md	docs/spec/design_spec.md		Japanese, tables, code, mermaid

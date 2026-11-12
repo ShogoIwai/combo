@@ -73,11 +73,15 @@ if [[ -n "$PASSWORD" ]]; then PDF_PW_ARGS+=(-upw "$PASSWORD"); fi
 INFO=$(pdfinfo "${PDF_PW_ARGS[@]+"${PDF_PW_ARGS[@]}"}" "$INPUT" 2>/dev/null) || INFO=""
 TOTAL=$(printf '%s\n' "$INFO" | awk '/^Pages:/ {print $2}')
 [[ -n "${TOTAL:-}" ]] || { echo "Error: cannot read page count (corrupt PDF?)" >&2; exit 1; }
-# pdfinfo still reports a page count for an encrypted PDF, so reject it here
-# rather than emit a document of silently empty pages — unless a password was
-# given, in which case every poppler call below carries it.
+# An encrypted PDF is rejected only when it cannot be opened without a
+# password. Owner-password restrictions alone (copy/change flags, common on
+# vendor datasheets) do not stop poppler from reading the text, so such a PDF
+# proceeds; a probe extraction decides rather than the Encrypted: flag.
 if [[ -z "$PASSWORD" ]] && printf '%s\n' "$INFO" | grep -q '^Encrypted:[[:space:]]*yes'; then
-    echo "Error: PDF is encrypted; use --password or decrypt with qpdf --decrypt" >&2; exit 1
+    if ! pdftotext -f 1 -l 1 "$INPUT" - >/dev/null 2>&1; then
+        echo "Error: PDF is encrypted and needs a password; use --password or decrypt with qpdf --decrypt" >&2; exit 1
+    fi
+    echo "Note: PDF carries owner-password restrictions only ($(printf '%s\n' "$INFO" | sed -n 's/^Encrypted:[[:space:]]*//p')); extraction proceeds."
 fi
 
 FIRST=1; LAST="$TOTAL"
