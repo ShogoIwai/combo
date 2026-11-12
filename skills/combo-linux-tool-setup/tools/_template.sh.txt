@@ -1,0 +1,30 @@
+# <name> — <説明>。このファイルを tools/<name>.sh として置くと対象ツールに加わる。
+# 削除は tools/<name>.sh を消すだけ。ただし導入状態にかかわらず、先に `toolsetup.sh remove <name> --yes` を
+# 成功させる(未導入でも残る設定は、定義が無いと検出も後始末もできなくなる)。
+#
+# 使えるヘルパ(toolsetup.sh 側で定義):
+#   run "<cmd>"                変更系コマンド。--dry-run で表示のみ(必ずこれを通す)
+#   need_sudo "<cmd>" "<理由>" root 権限が要る操作を依頼リストへ積む(sudo は直接書かない)
+#   require_cmd <cmd> [pkg] [理由]  無ければパッケージ導入の sudo 依頼を積み 1 を返す
+#   pkg_install_cmd <pkg...>   apt/dnf/yum/zypper に合わせた導入コマンド文字列
+#   npm_pkg_version/latest/install/remove <npm-pkg>   npm グローバルパッケージ用(latest はレジストリ直参照)
+#   rc_block <file> <id> "<body>" [旧行regex]  ~/.cshrc 等の管理ブロック書き換え(バックアップ付き)
+#   nvm_load                   nvm.sh を読み default の node を PATH に入れる
+TOOL_DESC="<説明 1 行>"
+TOOL_DEPS=""                      # 例: "node"
+# TOOL_SELF_REGEX='@scope/pkg'     # 任意。実行中エージェントがこのツールで動いているかを
+#                                   # プロセス祖先の exe/cmdline に対する ERE で判定 → 一致なら exit 5
+# TOOL_SELF_BLOCK="update remove"  # 任意。上が一致したとき止める操作(既定 "update remove")
+
+tool_version() { :; }             # 導入版を 1 行出力。未導入なら何も出さない(必須)
+tool_latest()  { :; }             # 最新版を 1 行出力。取れなければ何も出さない(必須)
+                                  # ローカル状態(キャッシュ・別名)を書き換えない方法で取る
+tool_prereq()  { return 0; }      # 任意。不足は require_cmd / need_sudo で積んで return 1
+tool_install() { run "false"; }   # 必須
+# tool_update() { ...; }          # 任意。未定義なら tool_install を使う
+# tool_sync()   { ...; }          # 任意。版に関係ない設定の同期・修復(冪等)。導入済みでも毎回呼ばれる
+tool_remove()  { run "false"; }   # 必須。実行後に tool_version が空になること(残れば失敗扱い)
+# tool_residue() { ...; }        # 任意。実体が無くても残る設定(管理ブロック・別名等)を 1 行ずつ出力
+#                                 # remove 後に何か出れば失敗扱い。依存先の remove も止める
+# tool_cleanup() { ...; }        # 任意。tool_residue の残存を消す(冪等)。未導入時の remove で呼ばれる
+# tool_post()  { echo "..."; }    # 任意。導入/更新後の次の手順(ログイン等)

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Linux Tool Setup"
+  short_description: "Install/update/remove user-level CLI tools (nvm, node, Claude Code, Codex)"
+  default_prompt: "Use $combo-linux-tool-setup to check and update the managed Linux CLI tools."
