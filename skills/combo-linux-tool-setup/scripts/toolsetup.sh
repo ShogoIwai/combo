@@ -242,6 +242,8 @@ block_self() {   # $1=操作 $2...=対象
 #   TOOL_SELF_REGEX  実行中エージェントがこのツールで動いているかの判定(祖先の exe/cmdline に ERE)  任意
 #   TOOL_SELF_BLOCK  上が一致したとき止める操作(既定 "update remove")                 任意
 #   tool_version     導入版を出力(未導入なら何も出さない)       必須
+#   tool_uptodate    0=指定どおり(更新不要)。版の一致だけで判断できないツール用(未定義なら導入版=最新版で判定)  任意
+#   tool_owned       このスキルが入れて管理している版(remove の対象・判定に使う)。未定義なら tool_version  任意
 #   tool_latest      最新版を出力(取れなければ何も出さない)。ローカル状態を変えないこと  必須
 #   tool_prereq      前提チェック。不足は require_cmd/need_sudo で積み、1 を返す  任意
 #   tool_install     導入                                         必須
@@ -251,7 +253,7 @@ block_self() {   # $1=操作 $2...=対象
 #   tool_residue     未導入でも残る設定(管理ブロック・別名等)を 1 行ずつ出力。無ければ何も出さない  任意
 #   tool_cleanup     tool_residue の残存設定を消す(冪等)。未導入時の remove で呼ぶ  任意
 #   tool_post        導入/更新後にユーザーへ伝える次の手順を出力  任意
-TOOL_FUNCS="tool_version tool_latest tool_prereq tool_install tool_update tool_sync tool_remove tool_residue tool_cleanup tool_post tool_self_regex"
+TOOL_FUNCS="tool_version tool_owned tool_uptodate tool_latest tool_prereq tool_install tool_update tool_sync tool_remove tool_residue tool_cleanup tool_post tool_self_regex"
 
 all_tools() {
     local f
@@ -283,7 +285,15 @@ resolve() {
     RESOLVED+=("$name")
 }
 
+# 更新不要か。tool_uptodate があればそれ、無ければ導入版と最新版の一致
+is_uptodate() {   # $1=tool $2=導入版 $3=最新版
+    ( load_tool "$1"; declare -F tool_uptodate >/dev/null || exit 2; tool_uptodate >/dev/null 2>&1 ); local r=$?
+    [ $r -ne 2 ] && return $r
+    [ -n "$3" ] && [ "${2#v}" = "${3#v}" ]
+}
 installed_version() { ( load_tool "$1"; tool_version 2>/dev/null | head -n1 ); }
+# remove の対象になる版。tool_owned があればそれ(PATH 上の管理外の導入物を据え置くツール用)
+owned_version()     { ( load_tool "$1"; if declare -F tool_owned >/dev/null; then tool_owned; else tool_version; fi 2>/dev/null | head -n1 ); }
 latest_version()    { ( load_tool "$1"; tool_latest 2>/dev/null | head -n1 ); }
 # 未導入でも残る設定(1 行 1 件。無ければ空)
 residue_of()        { ( load_tool "$1"; declare -F tool_residue >/dev/null || exit 0; tool_residue 2>/dev/null ) | paste -sd, -; }
@@ -308,7 +318,7 @@ cmd_status() {
         inst="$(installed_version "$t")"; lat="$(latest_version "$t")"
         if [ -z "$inst" ]; then st=missing; rc=1
         elif [ -z "$lat" ]; then st="ok(latest unknown)"
-        elif [ "${inst#v}" = "${lat#v}" ]; then st=ok
+        elif is_uptodate "$t" "$inst" "$lat"; then st=ok
         else st=outdated
         fi
         printf '%-14s %-14s %-14s %s\n' "$t" "${inst:--}" "${lat:--}" "$st"
@@ -346,8 +356,8 @@ apply_one() {   # $1=install|update $2=tool
         log "$t: 導入済み ($inst) — 版は変えない"
     elif [ "$mode" = update ] && [ -n "$inst" ]; then
         local lat; lat="$(latest_version "$t")"
-        if [ -n "$lat" ] && [ "${inst#v}" = "${lat#v}" ]; then
-            log "$t: 最新 ($inst) — 版は変えない"
+        if is_uptodate "$t" "$inst" "$lat"; then
+            log "$t: 最新(指定どおり) ($inst) — 版は変えない"
         else
             log "$t: 更新 $inst -> ${lat:-latest}"
             ( load_tool "$t"; if declare -F tool_update >/dev/null; then tool_update; else tool_install; fi ) \
@@ -430,7 +440,7 @@ cmd_remove() {
     for (( i=${#RESOLVED[@]}-1; i>=0; i-- )); do
         t="${RESOLVED[$i]}"
         case " $* " in *" $t "*) ;; *) continue ;; esac
-        if [ -n "$(installed_version "$t")" ]; then
+        if [ -n "$(owned_version "$t")" ]; then
             log "$t: 削除"
             ( load_tool "$t"; tool_remove ) || die "$t の削除に失敗"
         elif [ -n "$(residue_of "$t")" ]; then
@@ -438,11 +448,13 @@ cmd_remove() {
             log "$t: 未導入だが設定が残っている($(residue_of "$t"))— 後始末"
             ( load_tool "$t"; declare -F tool_cleanup >/dev/null || exit 1; tool_cleanup ) \
                 || die "$t の残存設定を消せない(tool_cleanup が無いか失敗)"
+        elif [ -n "$(installed_version "$t")" ]; then
+            log "$t: 管理外の導入物 ($(installed_version "$t")) は据え置き — 何もしない"; continue
         else
             log "$t: 未導入 — 何もしない"; continue
         fi
         if [ "$DRY_RUN" = 0 ]; then
-            [ -z "$(installed_version "$t")" ] || die "$t: 削除後も導入版が残っている($(installed_version "$t"))"
+            [ -z "$(owned_version "$t")" ] || die "$t: 削除後も導入版が残っている($(owned_version "$t"))"
             [ -z "$(residue_of "$t")" ] || die "$t: 削除後も設定が残っている($(residue_of "$t"))"
         fi
     done
