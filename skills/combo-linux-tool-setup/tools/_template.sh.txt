@@ -24,6 +24,7 @@ tool_install() { run "false"; }   # 必須
 # tool_update() { ...; }          # 任意。未定義なら tool_install を使う
 # tool_sync()   { ...; }          # 任意。版に関係ない設定の同期・修復(冪等)。導入済みでも毎回呼ばれる
 tool_remove()  { run "false"; }   # 必須。実行後に tool_version が空になること(残れば失敗扱い)
+                                  # root 権限が要る削除は need_sudo で積む → ドライバが SUDO_REQUEST(exit 3)
 # tool_residue() { ...; }        # 任意。実体が無くても残る設定(管理ブロック・別名等)を 1 行ずつ出力
 #                                 # remove 後に何か出れば失敗扱い。依存先の remove も止める
 # tool_cleanup() { ...; }        # 任意。tool_residue の残存を消す(冪等)。未導入時の remove で呼ばれる

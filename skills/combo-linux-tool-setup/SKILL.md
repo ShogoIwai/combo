@@ -1,13 +1,14 @@
 ---
 name: combo-linux-tool-setup
-description: Use when installing, updating, checking, or removing user-level Linux CLI tools on this host (initially nvm / Node.js LTS / Claude Code / Codex / Python 3 built with pyenv python-build), or when adding/removing a tool from the managed set. Japanese triggers — 「ツールをセットアップして」「Claude Code / Codex を入れて」「codex を更新して」「node を最新 LTS に」「nvm 入れて」「python3 を入れて」「pyenv で python をビルドして」「ツールの状態を確認」「セットアップ対象にツールを追加」「linux tool setup」.
+description: Use when installing, updating, checking, or removing user-level Linux CLI tools on this host (initially nvm / Node.js LTS / Claude Code / Codex / Python 3 built with pyenv python-build / slang SystemVerilog compiler / Universal Ctags), or when adding/removing a tool from the managed set. Japanese triggers — 「ツールをセットアップして」「Claude Code / Codex を入れて」「codex を更新して」「node を最新 LTS に」「nvm 入れて」「python3 を入れて」「pyenv で python をビルドして」「slang を入れて」「slang を更新して」「ctags-universal を入れて」「universal-ctags を入れて」「ツールの状態を確認」「セットアップ対象にツールを追加」「linux tool setup」.
 ---
 
 # combo-linux-tool-setup — Linux 汎用ツールセットアップ
 
 ユーザー領域(`$HOME` 配下)の CLI ツールを、**ツール定義ファイル 1 本＝ 1 ツール**の
 データ駆動で導入・更新・削除する。対象は `tools/<name>.sh` を足す／消すだけで増減する。
-初期の対象は **Claude Code / Codex** と、その土台の **nvm / node**、および **python3**(pyenv の python-build でビルド)。
+初期の対象は **Claude Code / Codex** と、その土台の **nvm / node**、および **python3**(pyenv の python-build でビルド)、**slang**(GitHub リリースのバイナリ。既定 v11.0 固定)、
+**ctags-universal**(OS パッケージ。導入・更新・削除は sudo 依頼)。
 
 原則: **goal が満たされなければ完了とせず、同じタスクを loop する。**
 **sudo は絶対に自分で実行しない。** root 権限が要る操作はユーザーに実行を依頼する。
@@ -22,7 +23,7 @@ description: Use when installing, updating, checking, or removing user-level Lin
 | **入力**        | 対象ツール名(省略時は status で全件)、操作(install / update / remove / ツール定義の追加・変更)。`bash`・`curl`・`git` が使えること(無ければ sudo 依頼)。python3 を導入・入れ替えるときは**ユーザーが指定する導入先パスと版**(`PYTHON_PREFIX` / `PYTHON_VERSION`) |
 | **type**        | `リカーシブ`(導入済みの状態を読み、差分だけ手を入れる。導入済み・最新のものには触れない) |
 | **出力**        | 導入・更新されたツール、`~/.cshrc` の管理ブロック(node / python3。変更時は `~/.cshrc.bak.<日時>.<pid>`)、追加・変更した `tools/<name>.sh`、ユーザーへの依頼(SUDO_REQUEST / NEXT_STEPS) |
-| **goal**        | 操作ごとに判定し、すべての場合で `toolsetup.sh lint` が `lint OK`。変更系(install / update / remove)は**本実行(`--dry-run` なし)が exit 0** であることが前提で、exit 3/4/5 は status に関係なく未完了(待ち・引き継ぎ。手順 5)。**install**: 加えて依頼された各ツールの `status` が `missing` でない(設定同期まで成功。導入済みの旧版は更新しないので `outdated` のままでも可)。**update**: 加えて `status` が `ok`。**remove**: 加えて `status` が `missing`(python3 は管理外の python3 が残るので、代わりに `.cshrc` に python3 の管理ブロックが無く、消した `<path>/python-<ver>` が無いこと)。**status のみ**: 実行して状態を報告できたこと(`missing` / `outdated` は直さない)。最新版が取れず `ok(latest unknown)` のときは、導入は確認できたが最新かは確認できなかった旨を報告する(update では `検証不能`) |
+| **goal**        | 操作ごとに判定し、すべての場合で `toolsetup.sh lint` が `lint OK`。変更系(install / update / remove)は**本実行(`--dry-run` なし)が exit 0** であることが前提で、exit 3/4/5 は status に関係なく未完了(待ち・引き継ぎ。手順 5)。**install**: 加えて依頼された各ツールの `status` が `missing` でない(設定同期まで成功。導入済みの旧版は更新しないので `outdated` のままでも可)。**update**: 加えて `status` が `ok`。**remove**: 加えて `status` が `missing`(python3 は管理外の python3 が残るので、代わりに `.cshrc` に python3 の管理ブロックが無く、消した `<path>/python-<ver>` が無いこと。ctags-universal は手で入れた Universal Ctags が残り得るので、代わりに OS パッケージが入っていないこと = `dpkg-query -W universal-ctags` で導入済みでないこと)。**status のみ**: 実行して状態を報告できたこと(`missing` / `outdated` は直さない)。最新版が取れず `ok(latest unknown)` のときは、導入は確認できたが最新かは確認できなかった旨を報告する(update では `検証不能`) |
 | **検証**        | `scripts/toolsetup.sh status <tool...>` と `scripts/toolsetup.sh lint` を実際に実行した出力と、変更系(install / update / remove)の本実行の終了コード |
 | **loop 上限**   | 3 回 |
 
@@ -35,7 +36,7 @@ description: Use when installing, updating, checking, or removing user-level Lin
 | `TS status [tool...]` | 導入版・最新版・状態(`ok` / `outdated` / `missing`) |
 | `TS install <tool...>` | 依存ごと導入。導入済みは版を変えず、設定同期(`tool_sync`)だけ行う |
 | `TS update <tool...>` | 指定ツールを最新へ。依存は未導入なら導入のみ(勝手に更新しない) |
-| `TS remove <tool...> --yes` | 削除。導入済み(または設定が残っている)依存元があれば拒否。未導入で設定だけ残るツールは後始末だけ行う。`tool_owned` を持つツール(python3)は、このスキルが入れた分だけを消し、管理外の導入物は据え置く。削除後に導入版か設定が残れば失敗 |
+| `TS remove <tool...> --yes` | 削除。導入済み(または設定が残っている)依存元があれば拒否。未導入で設定だけ残るツールは後始末だけ行う。`tool_owned` を持つツール(python3 / slang / ctags-universal)は、このスキルが入れた分だけを消し、管理外の導入物は据え置く。root 権限が要る削除(ctags-universal)は `tool_remove` が積んだ sudo 依頼を出して exit 3。削除後に導入版か設定が残れば失敗 |
 | `TS lint` | `tools/*.sh` の定義検査(必須関数・依存の実在・sudo 直書き禁止・構文) |
 | `--dry-run` | 変更系コマンドと `.cshrc` の差分を表示だけする。ファイル・`~/.nvm` の状態も変えない。未導入の依存は「導入予定」として計画を最後まで流す |
 
@@ -61,6 +62,7 @@ description: Use when installing, updating, checking, or removing user-level Lin
    - `node` の **update**(メジャー版が上がる。新 LTS に旧版のグローバル npm パッケージを
      `--reinstall-packages-from` で引き継ぎ、`~/.cshrc` の PATH を新版へ書き換える)
    - すべての **remove**(`--yes` はユーザーの了承を得てから付ける。exit 4 は確認待ち)
+   - `slang` の **update** で既定(v11.0)以外の版を指定するとき(`SLANG_VERSION=<tag>|latest`。slang を使う他のツールやスキルの結果が変わり得る)
 4. **ツール定義の追加・削除・更新**(対象ツールの増減の依頼のとき):
    - 追加: `tools/_template.sh.txt` を `tools/<name>.sh` にコピーし、必須関数
      (`tool_version` / `tool_latest` / `tool_install` / `tool_remove`)と `TOOL_DESC` /
@@ -212,6 +214,42 @@ description: Use when installing, updating, checking, or removing user-level Lin
   手書きの行や PATH 上の python3(システム・共有ディレクトリの python)は管理外として据え置き、何もしない。
   pyenv の clone は残す。
 - 動作確認は `CSHRC=<scratch>/cshrc PYTHON_PREFIX=<scratch>/inst` で隔離し、python3 を除いた PATH で行う。
+
+---
+
+## slang(GitHub リリースのビルド済みバイナリ)
+
+- 実績手順そのもの(`~/.local/opt/slang` に `slang-linux-x86_64.tar.gz` を展開し `~/.local/bin/slang` へリンク)。
+  リリースの tar はトップ階層なしで実行ファイル `slang` を直接含む(strip しない)。
+  ドライバは作業ディレクトリへ展開して起動を確かめてから差し替える。旧版は `slang.old` に退避し、本体の置き換えか
+  リンクの作成が失敗したら旧版へ戻す。導入先・リンク置き場に書き込めなければ何も変えずに失敗する。
+- 版は既定で **v11.0 に固定**(`SLANG_DEFAULT_VERSION`)。status の LATEST も固定版を出し、11.0 が入っていれば `ok`。
+  別の版へ上げるのは任意で、ユーザーが指定したときだけ `SLANG_VERSION=<tag>`(例: `12.1`)か `SLANG_VERSION=latest`
+  (`github.com/.../releases/latest` のリダイレクト先のタグ。API は使わない)を渡す。エージェントは勝手に上げない。
+  上げた後に `SLANG_VERSION` 無しで status を見ると `outdated` になり、そのまま update すると v11.0 へ戻る。
+  そのため update の goal 判定の `TS status slang` も、update と同じ `SLANG_VERSION` を付けて実行する。
+  タグ `v11.0` は `11.0.0` に読み替えて `slang --version` と比べる。
+- `tool_version` が見るのは `$SLANG_HOME/slang`(既定 `~/.local/opt/slang`)だけ。PATH 上の別の slang は管理外。
+  `SLANG_HOME` / `LOCAL_BIN` は絶対パスで英数字と `. _ / + @ , = -` のみ、かつ同じ場所を指さないこと(それ以外は何も変えずに失敗)。
+  `$LOCAL_BIN/slang`(既定 `~/.local/bin`)が管理外のファイル/リンクなら上書きせず失敗する。
+- remove は実体・それを指すリンク・空になった `$SLANG_HOME` を消す。実体が起動できなくなっていても
+  ファイルや差し替え途中の残骸(`slang.new` / `slang.old`)が残っていれば `broken` として消す(`tool_owned`)。
+- 動作確認は `SLANG_HOME=<scratch>/opt/slang LOCAL_BIN=<scratch>/bin` で隔離して行う。
+
+## ctags-universal(OS パッケージ)
+
+- 実績手順は `sudo apt-get install -y universal-ctags`(`/usr/bin/ctags-universal` が入る)。root 権限が要るので、
+  install(未導入時)・update(apt の候補版より古いとき)は前提チェックで、remove は削除時に
+  **SUDO_REQUEST(exit 3)** を出して止まる。ユーザーが依頼行を実行したら同じコマンドを再実行して goal を判定する。
+  パッケージが `apt-mark hold` 中だと apt が `-y` での更新・削除を拒否するので、update(要更新のとき)・remove は
+  依頼行を出さずに失敗(exit 1)し、`sudo apt-mark unhold universal-ctags` で解除するかをユーザーに判断してもらう
+  (エージェントは解除を勧めない・自分で決めない)。hold 中でも status・install(導入済みなら据え置き)は通常どおり。
+- 導入版は `ctags-universal --version`(無ければ Universal Ctags である `ctags`)の版(`5.9.0`)。LATEST は
+  `apt-cache policy` の候補版(`<upstream>-<revision>` 形式)で、書式が違うので更新要否は dpkg の導入版と候補版で比べる
+  (`tool_uptodate`。`dpkg --compare-versions` で候補版**以上**なら最新扱い。別リポジトリの新しい版を古い候補版へ戻させない)。
+  apt 以外の環境では `ok(latest unknown)` で、update しても判定できないので `検証不能` として報告する。
+- 管理するのは **OS パッケージだけ**(`tool_owned`。rpm 系は PATH 上の Universal Ctags の実体を `ctags` パッケージが所有するときだけ)。パッケージ外で手で入れた Universal Ctags しか無いときは
+  導入済み・`ok(latest unknown)` として据え置き、update も remove も何もしない(apt の依頼を出さない)。
 
 ---
 

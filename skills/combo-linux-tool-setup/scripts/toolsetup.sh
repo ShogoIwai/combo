@@ -303,16 +303,16 @@ effective_version() { local v; v="$(installed_version "$1")"; [ -n "$v" ] || v="
 # ---------------------------------------------------------------- サブコマンド
 cmd_list() {
     local t
-    printf '%-14s %-24s %s\n' TOOL DEPS DESCRIPTION
+    printf '%-16s %-24s %s\n' TOOL DEPS DESCRIPTION
     for t in $(all_tools); do
-        printf '%-14s %-24s %s\n' "$t" "$(tool_field "$t" TOOL_DEPS)" "$(tool_field "$t" TOOL_DESC)"
+        printf '%-16s %-24s %s\n' "$t" "$(tool_field "$t" TOOL_DEPS)" "$(tool_field "$t" TOOL_DESC)"
     done
 }
 
 cmd_status() {
     local t inst lat st rc=0
     [ $# -eq 0 ] && set -- $(all_tools)
-    printf '%-14s %-14s %-14s %s\n' TOOL INSTALLED LATEST STATE
+    printf '%-16s %-14s %-18s %s\n' TOOL INSTALLED LATEST STATE
     for t in "$@"; do
         tool_exists "$t" || usage_die "未登録のツール: $t"
         inst="$(installed_version "$t")"; lat="$(latest_version "$t")"
@@ -321,7 +321,7 @@ cmd_status() {
         elif is_uptodate "$t" "$inst" "$lat"; then st=ok
         else st=outdated
         fi
-        printf '%-14s %-14s %-14s %s\n' "$t" "${inst:--}" "${lat:--}" "$st"
+        printf '%-16s %-14s %-18s %s\n' "$t" "${inst:--}" "${lat:--}" "$st"
     done
     return $rc
 }
@@ -442,7 +442,14 @@ cmd_remove() {
         case " $* " in *" $t "*) ;; *) continue ;; esac
         if [ -n "$(owned_version "$t")" ]; then
             log "$t: 削除"
-            ( load_tool "$t"; tool_remove ) || die "$t の削除に失敗"
+            # OS パッケージ等で root 権限が要る削除は tool_remove が need_sudo で依頼を積む → exit 3
+            ( SUDO_REQUESTS=(); load_tool "$t"; tool_remove; r=$?
+              [ "${#SUDO_REQUESTS[@]}" -gt 0 ] && printf '%s\n' "${SUDO_REQUESTS[@]}" > "$SUDO_TMP"
+              exit $r ) || die "$t の削除に失敗"
+            if [ -s "$SUDO_TMP" ]; then
+                mapfile -t SUDO_REQUESTS < "$SUDO_TMP"; : > "$SUDO_TMP"
+                flush_sudo_requests; exit 3
+            fi
         elif [ -n "$(residue_of "$t")" ]; then
             # 実体は無いが設定だけ残っている(管理ブロック・別名など)→ 後始末だけ行う
             log "$t: 未導入だが設定が残っている($(residue_of "$t"))— 後始末"
