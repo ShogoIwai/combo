@@ -1,0 +1,42 @@
+# gen.py / fetch_models.py のプリセット雛形（SDXL 系 Illustrious / NoobAI epsilon を想定した値）
+#
+# file はそれぞれ <install-dir>/models/<種別>/ からの相対パス（.. や絶対パスは不可）。
+# source は fetch_models.py が使う入手元。次のどれか 1 つ:
+#   {civitai_version: <モデルバージョン ID>}                      Civitai（API キー必須）
+#   {hf_repo: <owner/repo>, hf_file: <ファイル>, revision: <commit>}  Hugging Face（revision は任意だが固定推奨）
+#   {url: <直接 URL>}
+# sha256 は配布元の値（大文字小文字は問わない）。書いておくと取得時に照合し、合わなければ捨てる。
+# source の無いもの（配布されていない LoRA 等）は手で models/ に置く。
+
+checkpoint:
+  file: CHANGE_ME.safetensors
+  # source: {civitai_version: 0}
+  # sha256: ""
+
+vae:
+  # SDXL の原版 VAE は fp16 で NaN（黒画像）になりやすい。fp16-fix 版を既定にする。
+  # 外す（checkpoint 内蔵の VAE を使う）ならこのブロックごと消す。
+  file: sdxl_vae.safetensors
+  source: {hf_repo: madebyollin/sdxl-vae-fp16-fix, hf_file: sdxl_vae.safetensors,
+           revision: 207b116dae70ace3637169f1ddd2434b91b3a8cd}
+  sha256: 235745af8d86bf4a4c1b5b4f529868b37019a10f7c0b2e79ad0abca3a22bc6e1
+
+loras: []
+  # - name: style                 # --lora style=0.6 で重みを変えるときの名前
+  #   file: some_style.safetensors
+  #   weight: 0.4                 # 0 なら読み込まない（原版・代替を切り替えるときに使う）
+  #   source: {civitai_version: 0}
+  #   sha256: ""
+
+params:
+  width: 1024           # 8 の倍数でなければ 8 単位に切り捨てて生成する
+  height: 1024
+  sampler: euler_ancestral   # ComfyUI のサンプラー名（euler / euler_ancestral / dpmpp_2m など）
+  scheduler: normal          # normal / karras / sgm_uniform / simple など
+  steps: 25
+  cfg: 5
+  clip_skip: 2          # A1111 の Clip Skip。ComfyUI では CLIPSetLastLayer -N になる
+
+negative: >-
+  worst quality, low quality, bad anatomy, bad hands, missing fingers, extra digits,
+  lowres, signature, watermark, username

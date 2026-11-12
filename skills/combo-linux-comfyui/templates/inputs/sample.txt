@@ -1,0 +1,8 @@
+# プロンプトファイルの例（# で始まる行はコメント）
+# ポジティブは複数行に分けて書ける（行は空白でつながるので、タグ区切りのカンマは行末にも付ける）
+masterpiece, best quality, amazing quality,
+1girl, solo, long hair, kimono, cherry blossoms,
+looking at viewer, smile, upper body, outdoors, wind
+# 「Negative prompt:」以降はネガティブ（省略時はプリセットの negative）。<lora:...> タグは使えない
+Negative prompt: worst quality, low quality, bad anatomy, bad hands, missing fingers,
+extra digits, lowres, signature, watermark, username

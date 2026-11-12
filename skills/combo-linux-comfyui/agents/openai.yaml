@@ -1,0 +1,4 @@
+interface:
+  display_name: "Linux ComfyUI CLI"
+  short_description: "Set up ComfyUI as a headless, command-line image generator; fetch models with sha256 checks; reproduce TensorArt/A1111 settings as presets"
+  default_prompt: "Use $combo-linux-comfyui to set up ComfyUI for command-line image generation."
