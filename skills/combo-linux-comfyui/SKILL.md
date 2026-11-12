@@ -1,6 +1,6 @@
 ---
 name: combo-linux-comfyui
-description: Use when setting up or operating a command-line (no GUI) image-generation environment on Linux with ComfyUI and an NVIDIA GPU — installing ComfyUI, fetching SDXL / Illustrious / NoobAI checkpoints and LoRAs from Civitai / Hugging Face with sha256 checks, turning TensorArt or A1111 generation settings (model, LoRA weights, sampler, scheduler, steps, CFG, clip skip, size) into a reusable preset, and generating images from prompt files. Japanese triggers — 「ComfyUI を入れて」「ComfyUI をコマンドラインで使いたい」「TensorArt の設定をローカルで再現」「TensorArt と同じ設定で画像生成」「Illustrious / NoobAI をローカルで動かす」「LoRA を落としてプリセットに入れて」「プロンプトファイルから画像生成」「comfyui setup」「comfyui cli」.
+description: Use when setting up or operating a command-line (no GUI) image-generation environment on Linux with ComfyUI and an NVIDIA GPU — installing ComfyUI, fetching SDXL / Illustrious / NoobAI checkpoints and LoRAs from Civitai / Hugging Face with sha256 checks, turning TensorArt or A1111 generation settings (model, LoRA weights, sampler, scheduler, steps, CFG, clip skip, size) into a reusable preset, expanding a base prompt with per-item templates (place / action / negative) into prompt files, and generating images from prompt files. Japanese triggers — 「ComfyUI を入れて」「ComfyUI をコマンドラインで使いたい」「TensorArt の設定をローカルで再現」「TensorArt と同じ設定で画像生成」「Illustrious / NoobAI をローカルで動かす」「LoRA を落としてプリセットに入れて」「プロンプトファイルから画像生成」「テンプレートでプロンプトを差し替えて量産」「prompts から inputs を作って」「comfyui setup」「comfyui cli」.
 ---
 
 # combo-linux-comfyui — ComfyUI をコマンドラインで使う画像生成環境
@@ -23,10 +23,10 @@ API ワークフローを組んで投げる。GUI は使わない。モデルは
 
 | 項目 | 内容 |
 | --- | --- |
-| **できること** | ComfyUI の導入（タグ固定）、モデル取得と sha256 照合、TensorArt / A1111 設定からのプリセット作成、プロンプトファイルからの一括生成、サーバの起動・停止 |
+| **できること** | ComfyUI の導入（タグ固定）、モデル取得と sha256 照合、TensorArt / A1111 設定からのプリセット作成、プロンプトファイルからの一括生成、ベースプロンプトの項目をテンプレートで差し替えたプロンプトファイルの量産（`prompts/` → `inputs/`）、サーバの起動・停止 |
 | **入力** | 導入先 `<install-dir>`（ユーザー指定）。再現したい生成設定（TensorArt のスクリーンショット・生成情報、または値の指定）。使う Python（既定は PATH 上の `python3`。CUDA 版 torch 導入済みであること）。Civitai から取るなら API キー |
 | **type** | `リカーシブ`（導入済みの環境を読み、差分だけ手を入れる。既存のプリセット・inputs・モデルは上書きしない） |
-| **出力** | `<install-dir>/`（`ComfyUI/`・`models/`・`presets/<名前>.yaml`・`inputs/`・`gen.py`・`fetch_models.py`・`README.md`）、生成画像 `outputs/<日付>/` |
+| **出力** | `<install-dir>/`（`ComfyUI/`・`models/`・`presets/<名前>.yaml`・`inputs/`・`prompts/`・`gen.py`・`fetch_models.py`・`process_inputs.py`・`README.md`）、生成画像 `outputs/<日付>/` |
 | **goal** | (1) `fetch_models.py --preset <名前> --check` が exit 0（有効なモデルが全部揃い sha256 一致）。(2) `gen.py -P sample --preset <名前> --seed <N>` が exit 0 で PNG を出し、**その画像を開いて**黒画像・ノイズだけ・明らかな崩れが無いことを確認。(3) `gen.py --server stop` でサーバを止めてから同じコマンドを再実行した画像が 1 枚目と画素一致（再現性。止めずに再実行すると ComfyUI のキャッシュで KSampler が再計算されず、比較にならない）。(4) 再現できない項目（入手できない LoRA・ENSD・シードの乱数系・VAE の実体など）を報告に列挙 |
 | **検証** | 上の 3 コマンドの実際の終了コードと出力、生成画像の目視、画素比較（`<skill>/scripts/same_image.py A.png B.png` が `identical`） |
 | **loop 上限** | 3 回 |
@@ -35,11 +35,13 @@ API ワークフローを組んで投げる。GUI は使わない。モデルは
 
 | ファイル | 内容 |
 | --- | --- |
-| `<skill>/scripts/setup_comfyui.sh <install-dir> [--tag vX.Y.Z] [--python P]` | 前提確認（nvidia-smi・CUDA 版 torch）→ ComfyUI clone・タグ checkout → `pip --dry-run` で torch が入れ替わらないことを確認して requirements 導入 → `extra_model_paths.yaml`・ディレクトリ・スクリプト・雛形を配置。`--update-scripts` で gen.py / fetch_models.py だけ差し替え |
+| `<skill>/scripts/setup_comfyui.sh <install-dir> [--tag vX.Y.Z] [--python P]` | 前提確認（nvidia-smi・CUDA 版 torch）→ ComfyUI clone・タグ checkout → `pip --dry-run` で torch が入れ替わらないことを確認して requirements 導入 → `extra_model_paths.yaml`・ディレクトリ・スクリプト・雛形を配置。`--update-scripts` で gen.py / fetch_models.py / process_inputs.py だけ差し替え |
 | `<skill>/scripts/gen.py` | 生成 CLI（導入先にコピーされる）。使い方は `templates/README.md` |
 | `<skill>/scripts/fetch_models.py` | モデル取得・sha256 照合（導入先にコピーされる） |
+| `<skill>/scripts/process_inputs.py` | `prompts/<base>.txt` の項目（`Place:` など）を `prompts/template/template-<N>.txt` で差し替え、ネガティブを付け直して（`template-<N>` に無ければ `template-1` の共通ネガティブ） `inputs/<base>-<N>.txt` を作る（導入先にコピーされる）。書式は `templates/README.md` |
 | `<skill>/scripts/find_model.py` | Civitai 検索・CivArchive 参照（ID・ファイル名・sha256・ダウンロード可否・ミラー） |
 | `<skill>/scripts/same_image.py A B` | 2 枚が画素単位で同一か（サイズ・モード・全チャンネル） |
+| `<skill>/templates/prompts/` | `process_inputs.py` の雛形（ベース `sample.txt`・`template/template-{1,2}.txt`。テンプレートは導入先の `prompts/template/` に `template-*.txt` が 1 本も無いときだけ置く） |
 | `<skill>/templates/presets/default.yaml` | プリセット雛形（書式の説明つき。`CHANGE_ME` が残っていると gen.py / fetch_models.py は止まる） |
 | `<skill>/references/tensorart_to_comfyui.md` | TensorArt / A1111 → ComfyUI の項目対応、モデル入手の判断、つまずいた点 |
 
@@ -115,4 +117,8 @@ API ワークフローを組んで投げる。GUI は使わない。モデルは
 ./gen.py -P <inputs の名前> [--seed N] [-c 枚数] [--preset 名前]
 ./gen.py -p "<プロンプト>" --lora <name>=0.6 --lora-file <file>=0.5
 ./gen.py --server status | start | stop | log
+./process_inputs.py [base ...] [--dry-run]   # prompts/<base>.txt × template-<N> → inputs/<base>-<N>.txt
 ```
+
+`process_inputs.py` は `inputs/<base>-<N>.txt` を毎回作り直す（範囲外になった番号は消す）。ユーザーが手で直した
+`inputs/<base>-<N>.txt` があれば上書きされるので、直すならベースかテンプレートの側を直す。

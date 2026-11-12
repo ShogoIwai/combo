@@ -1,0 +1,4 @@
+Person: 1girl, solo, long hair, masterpiece, best quality, amazing quality,
+Attire: kimono,
+Place: outdoors, cherry blossoms, wind,
+Action: looking at viewer, smile, upper body

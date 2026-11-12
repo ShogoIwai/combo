@@ -12,6 +12,8 @@ GUI は使わない（サーバは 127.0.0.1 だけで待ち受ける）。
 | `models/{checkpoints,loras,vae,embeddings,upscale_models}` | モデル |
 | `presets/*.yaml` | プリセット（モデル・LoRA の重み・生成パラメータ・入手元・sha256） |
 | `inputs/*.txt` | プロンプトファイル（`inputs/sample.txt` が書式例） |
+| `prompts/<base>.txt`・`prompts/template/template-<N>.txt` | `process_inputs.py` の入力（ベースと差し替えテンプレート） |
+| `process_inputs.py` | ベースの項目をテンプレートで差し替えて `inputs/<base>-<N>.txt` を作る |
 | `gen.py` | 生成 CLI |
 | `fetch_models.py` | プリセットのモデルを取得して sha256 を照合 |
 | `outputs/<日付>/` | 生成画像（PNG にワークフローが埋め込まれる） |
@@ -63,7 +65,35 @@ chmod 600 ~/.config/civitai/token      # 環境変数 CIVITAI_TOKEN でも可
 - 解釈するのはテキストと上の 2 種類の行だけ。A1111 の `<lora:名前:重み>` タグはエラーにする
   （LoRA は `--lora` / `--lora-file` かプリセットで指定）。パラメータ行の値も反映しない。
 - `#` で始まる行はコメント。
+- ポジティブの行頭の `Person:` `Attire:` `Place:` `Action:`（大文字小文字・全角 `：` 可）は外してつなぐ。
+  前の行がカンマで終わっていなければカンマを補う（`Attire: kimono` の次に `Place: outdoors` → `kimono, outdoors`）。
+  ネガティブ側と、行の途中に書いたラベルはそのまま。
 - 出力ファイル名の先頭はプロンプトファイル名（`outputs/<日付>/<名前>_<時刻>_s<シード>_00001_.png`）。
+
+### テンプレートでプロンプトを量産する（`process_inputs.py`）
+
+ベース 1 本の一部の項目（場所・動作など）だけを差し替えたプロンプトファイルを `inputs/` に作る。
+
+```sh
+./process_inputs.py                 # prompts/ の <数字>.txt を全部
+./process_inputs.py 1 sample        # prompts/1.txt と prompts/sample.txt だけ
+./process_inputs.py --dry-run       # 書かずに、作る・消すファイルだけ表示
+./gen.py -P 1-1 1-2 1-3             # 作ったものから生成
+```
+
+- ベース `prompts/<base>.txt` は「ラベル: 値」の行で項目を書く（`Person:` `Attire:` `Place:` `Action:` `場所:` など。ラベルは文字で始まり、文字・数字・空白・`_`・`-` だけ。全角の `：` も可）。
+  `Negative prompt:` の判定は gen.py と同じ（行頭の空白・大文字小文字は問わない）。BOM 付き UTF-8 も読める。
+  ラベル行に続く空行でない行は同じ項目の続き。空行・`#` 行・次のラベル行で項目が終わる。
+- `prompts/template/template-<N>.txt` には差し替えたい項目だけを書く。ベースと同じラベルの項目が置き換わり、
+  書かなかった項目はベースのまま。ベースに無いラベルは使わず WARN。
+- ネガティブはベースの `Negative prompt:` 以降を捨てて付け直す。`template-<N>` に `Negative prompt:` があればそれ、
+  無ければ `template-1` のもの（共通のネガティブは `template-1` にだけ書けばよい）。`template-1` にも無ければ
+  ネガティブ無し＝プリセットの negative。
+- 出力は `inputs/<base>-1.txt` 〜 `<base>-<最大の N>.txt`。`template-1` に項目を書かなければ `<base>-1` はベースそのもの。
+  番号の抜けは WARN を出してベースそのまま（＋ `template-1` のネガティブ）。
+- `inputs/<base>-<N>.txt` は毎回作り直し、テンプレートが減って範囲外になった `<base>-<M>.txt` は消す。それ以外の `inputs/` には触れない。
+- gen.py は `Person:` `Attire:` `Place:` `Action:` のラベルを外して読む（上の「プロンプトファイル」）。
+  それ以外のラベル（`場所:` など）はテキストのまま CLIP に渡る。
 
 ### 枚数とシード
 

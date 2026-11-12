@@ -445,12 +445,18 @@ def check_lora_tags(text, where):
                  "--lora NAME=W / --lora-file FILE=W かプリセットの loras で指定してください")
 
 
+# プロンプトファイルの項目ラベル。行頭にあれば外し、前の項目とカンマでつないで 1 つのポジティブにする
+PROMPT_LABEL = re.compile(r"^(?:Person|Attire|Place|Action)\s*[:：]\s*", re.IGNORECASE)
+
+
 def read_prompt_file(path):
     """プロンプトファイルを読む。
 
     - 1 行目以降がポジティブ（改行は ", " ではなく空白でつなぐ。タグ区切りはカンマで書く）
     - 「Negative prompt:」で始まる行以降はネガティブ
     - 「#」で始まる行はコメント、「Steps: 」で始まる A1111 のパラメータ行は無視
+    - ポジティブの行頭の「Person:」「Attire:」「Place:」「Action:」は外してつなぐ
+      （前の行がカンマで終わっていなければカンマを補う）
     - A1111 の <lora:名前:重み> タグは解釈しない（エラーにする。LoRA は --lora/--lora-file かプリセットで）
     """
     pos, neg = [], None
@@ -465,6 +471,12 @@ def read_prompt_file(path):
             t = t[len("negative prompt:"):].strip()
             if not t:
                 continue
+        elif cur is pos:
+            t, n = PROMPT_LABEL.subn("", t, count=1)
+            if not t:
+                continue        # ラベルだけの行は捨てる（前の行にカンマも足さない）
+            if n and pos and not pos[-1].endswith(","):
+                pos[-1] += ","
         cur.append(t)
     if not pos:
         sys.exit(f"ポジティブプロンプトが空: {path}")

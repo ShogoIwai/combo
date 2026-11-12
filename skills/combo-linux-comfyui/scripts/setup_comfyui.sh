@@ -3,7 +3,7 @@
 #
 #   setup_comfyui.sh <install-dir> [--tag vX.Y.Z] [--python <python3>] [--allow-torch-change]
 #   setup_comfyui.sh <install-dir> --update-scripts [--python <python3>]
-#                                         # gen.py / fetch_models.py だけ差し替え
+#                                         # gen.py / fetch_models.py / process_inputs.py だけ差し替え
 #
 # - Python は venv を作らず、指定（既定は PATH 上の python3）の環境へ直接 pip で入れる。
 #   使った Python の絶対パスは <install-dir>/.comfyui_python に記録し、gen.py / fetch_models.py の
@@ -51,13 +51,13 @@ case "$PY_ABS" in /*) ;; *) die "python の絶対パスを解決できません:
 
 copy_scripts() {
   local f
-  for f in gen.py fetch_models.py; do
+  for f in gen.py fetch_models.py process_inputs.py; do
     { printf '#!%s\n' "$PY_ABS"; tail -n +2 "$SKILL_DIR/scripts/$f"; } > "$DEST/.$f.tmp"
     chmod 755 "$DEST/.$f.tmp"
     mv -f "$DEST/.$f.tmp" "$DEST/$f"
   done
   printf '%s\n' "$PY_ABS" > "$DEST/.comfyui_python"
-  echo "scripts: gen.py, fetch_models.py（python: $PY_ABS）"
+  echo "scripts: gen.py, fetch_models.py, process_inputs.py（python: $PY_ABS）"
 }
 
 if [ "$ONLY_SCRIPTS" = 1 ]; then
@@ -106,7 +106,7 @@ fi
 
 # ---- 配置
 mkdir -p "$DEST"/models/{checkpoints,loras,vae,embeddings,upscale_models} \
-         "$DEST"/{outputs,logs,inputs,presets}
+         "$DEST"/{outputs,logs,inputs,presets,prompts/template}
 emp="$C/extra_model_paths.yaml"
 new=$(cat <<EOF
 shared:
@@ -129,6 +129,11 @@ copy_scripts
 [ -e "$DEST/presets/default.yaml" ] || cp "$SKILL_DIR/templates/presets/default.yaml" "$DEST/presets/default.yaml"
 [ -e "$DEST/inputs/sample.txt" ] || cp "$SKILL_DIR/templates/inputs/sample.txt" "$DEST/inputs/sample.txt"
 [ -e "$DEST/README.md" ] || cp "$SKILL_DIR/templates/README.md" "$DEST/README.md"
+[ -e "$DEST/prompts/sample.txt" ] || cp "$SKILL_DIR/templates/prompts/sample.txt" "$DEST/prompts/sample.txt"
+# 差し替えテンプレートの雛形は、prompts/template/ にまだ 1 本も無いときだけ置く（番号の混在を避ける）
+if ! compgen -G "$DEST/prompts/template/template-*.txt" >/dev/null; then
+  cp "$SKILL_DIR"/templates/prompts/template/template-*.txt "$DEST/prompts/template/"
+fi
 
 cat <<EOF
 
@@ -139,4 +144,5 @@ cat <<EOF
   2. Civitai から取るなら API キーを ~/.config/civitai/token に置く（README の「準備」参照）
   3. ./fetch_models.py               # モデル取得・sha256 照合
   4. ./gen.py -P sample              # 生成（初回はサーバ自動起動）
+  5. ./process_inputs.py sample      # prompts/sample.txt をテンプレートで差し替えて inputs/sample-<N>.txt に
 EOF

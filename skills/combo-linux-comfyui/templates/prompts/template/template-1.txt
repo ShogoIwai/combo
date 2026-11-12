@@ -1,0 +1,2 @@
+Negative prompt: worst quality, low quality, bad anatomy, bad hands, missing fingers,
+extra digits, lowres, signature, watermark, username
