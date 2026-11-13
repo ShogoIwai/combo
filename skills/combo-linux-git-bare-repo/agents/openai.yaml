@@ -1,0 +1,4 @@
+interface:
+  display_name: "Linux Git Bare Repo"
+  short_description: "Create an on-premises shared (group-writable, setgid) bare git remote repository"
+  default_prompt: "Use $combo-linux-git-bare-repo to create a shared bare remote repository at <rep>."
