@@ -545,8 +545,8 @@ When a skill body needs to write an **absolute** path (repo locations, example
 e.g. `<launch-root>/<repo>/verif/<dut>/...` — not on `~/rep`, `$HOME`, or any
 machine-specific absolute. `~/rep` is just one machine's symlink to the launch
 root; hardcoding it breaks the skill on other environments and obscures the
-multi-repo scope. Use the exact spelling `<launch-root>` (with a space) so it
-matches the rest of this README.
+multi-repo scope. Use the exact spelling `<launch-root>` (hyphenated, no space) so
+it matches the rest of this README.
 
 #### Name by origin layer (prefix convention)
 
