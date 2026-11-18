@@ -359,7 +359,7 @@ def build_workflow(preset, args, job, seed, loras):
         "scheduler": args.scheduler or pr.get("scheduler", "normal"),
         "denoise": 1.0}}
     wf["decode"] = {"class_type": "VAEDecode", "inputs": {"samples": ["sampler", 0], "vae": vae_ref}}
-    prefix = f"{time.strftime('%Y%m%d')}/{job['name']}_{time.strftime('%H%M%S')}_s{seed}"
+    prefix = f"{job.get('subdir') or time.strftime('%Y%m%d')}/{job['name']}_{time.strftime('%H%M%S')}_s{seed}"
     wf["save"] = {"class_type": "SaveImage", "inputs": {"images": ["decode", 0], "filename_prefix": prefix}}
     return wf
 
@@ -484,6 +484,14 @@ def read_prompt_file(path):
     return {"prompt": " ".join(pos), "negative": None if neg is None else " ".join(neg)}
 
 
+def output_subdir(path):
+    """プロンプトファイル名（拡張子を除く）に「_」が 2 個以上あれば、1 個目の「_」の前後の
+    文字列（2 個目の「_」の手前まで）を outputs/ 直下の出力ディレクトリ名にする。
+    例: <A>_<B>_<C>.txt → outputs/<A>_<B>/。それ以外は None（日付ディレクトリ）。"""
+    parts = path.stem.split("_")
+    return f"{parts[0]}_{parts[1]}" if len(parts) >= 3 else None
+
+
 # ---------------------------------------------------------------- main
 def validate_args(ap, a):
     """サーバを起動する前に数値を検査する（黙って既定値や丸めに置き換えない）。"""
@@ -559,6 +567,7 @@ def main():
     for f in resolve_prompt_files(args.prompt_file or []):
         j = read_prompt_file(f)
         j["name"] = args.name or f.stem
+        j["subdir"] = output_subdir(f)
         j["file"] = f
         jobs.append(j)
     if not jobs:

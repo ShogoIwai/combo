@@ -26,7 +26,7 @@ API ワークフローを組んで投げる。GUI は使わない。モデルは
 | **できること** | ComfyUI の導入（タグ固定）、モデル取得と sha256 照合、TensorArt / A1111 設定からのプリセット作成、プロンプトファイルからの一括生成、ベースプロンプトの項目をテンプレートで差し替えたプロンプトファイルの量産（`prompts/` → `inputs/`）、サーバの起動・停止 |
 | **入力** | 導入先 `<install-dir>`（ユーザー指定）。再現したい生成設定（TensorArt のスクリーンショット・生成情報、または値の指定）。使う Python（既定は PATH 上の `python3`。CUDA 版 torch 導入済みであること）。Civitai から取るなら API キー |
 | **type** | `リカーシブ`（導入済みの環境を読み、差分だけ手を入れる。既存のプリセット・inputs・モデルは上書きしない） |
-| **出力** | `<install-dir>/`（`ComfyUI/`・`models/`・`presets/<名前>.yaml`・`inputs/`・`prompts/`・`gen.py`・`fetch_models.py`・`process_inputs.py`・`README.md`）、生成画像 `outputs/<日付>/` |
+| **出力** | `<install-dir>/`（`ComfyUI/`・`models/`・`presets/<名前>.yaml`・`inputs/`・`prompts/`・`gen.py`・`fetch_models.py`・`process_inputs.py`・`README.md`）、生成画像 `outputs/<日付>/`（プロンプトファイル名に `_` が 2 個以上なら `outputs/<A>_<B>/`） |
 | **goal** | (1) `fetch_models.py --preset <名前> --check` が exit 0（有効なモデルが全部揃い sha256 一致）。(2) `gen.py -P sample --preset <名前> --seed <N>` が exit 0 で PNG を出し、**その画像を開いて**黒画像・ノイズだけ・明らかな崩れが無いことを確認。(3) `gen.py --server stop` でサーバを止めてから同じコマンドを再実行した画像が 1 枚目と画素一致（再現性。止めずに再実行すると ComfyUI のキャッシュで KSampler が再計算されず、比較にならない）。(4) 再現できない項目（入手できない LoRA・ENSD・シードの乱数系・VAE の実体など）を報告に列挙 |
 | **検証** | 上の 3 コマンドの実際の終了コードと出力、生成画像の目視、画素比較（`<skill>/scripts/same_image.py A.png B.png` が `identical`） |
 | **loop 上限** | 3 回 |
