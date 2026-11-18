@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """prompts/ のベースファイルを、テンプレートで項目ごとに差し替えて inputs/ のプロンプトファイルにする。
 
-  ./process_inputs.py                 # prompts/ の <数字>.txt を全部
+  ./process_inputs.py                 # prompts/ の <英数字・アンダーバー>.txt を全部
   ./process_inputs.py 1 sakura        # prompts/1.txt と prompts/sakura.txt だけ（名前は何でもよい）
   ./process_inputs.py --dry-run       # 書かずに、作る・消すファイルだけ表示
 
@@ -94,7 +94,7 @@ def build(base_body: list[str], tpl_path: Path | None, common_neg: list[str], ou
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("bases", nargs="*", help="prompts/ のベース名（.txt 省略可）。省略時は <数字>.txt 全部")
+    ap.add_argument("bases", nargs="*", help="prompts/ のベース名（.txt 省略可）。省略時は英数字・アンダーバーの名前の .txt 全部")
     ap.add_argument("--dry-run", action="store_true", help="書かずに、作る・消すファイルだけ表示")
     args = ap.parse_args()
 
@@ -121,9 +121,9 @@ def main() -> int:
                 return 1
             bases.append(p)
     else:
-        bases = sorted(p for p in PROMPTS.glob("*.txt") if p.stem.isdigit())
+        bases = sorted(p for p in PROMPTS.glob("*.txt") if re.fullmatch(r"[A-Za-z0-9_]+", p.stem) or p.stem.isdigit())
         if not bases:
-            print(f"error: {PROMPTS}/<数字>.txt がありません（名前で指定するなら引数に）", file=sys.stderr)
+            print(f"error: {PROMPTS}/<英数字・アンダーバー>.txt がありません（その他の名前で指定するなら引数に）", file=sys.stderr)
             return 1
 
     if not args.dry_run:
