@@ -7,7 +7,7 @@
 
 Civitai は API キーが必要: 環境変数 CIVITAI_TOKEN か ~/.config/civitai/token に置く
 （civitai.com → User Settings → API Keys で発行）。
-source の無いモデル（TensorArt 専用 LoRA 等）は手動で置く。置き場所とファイル名を表示する。
+source の無いモデル（配布ページから手で落とすもの等）は手動で置く。置き場所とファイル名を表示する。
 
 取得は同じディレクトリの一時ファイルへ行い、sha256 が合ったときだけ正式名にする
 （合わなければ一時ファイルは削除）。1 件の失敗で止めず、最後に失敗一覧を出して終了コード 1。
