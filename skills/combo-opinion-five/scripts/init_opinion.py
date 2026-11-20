@@ -17,7 +17,16 @@
 
 usage:
   python3 init_opinion.py <input1.md> [<input2.txt> ...] [--stance <stance.md>]
-                          --work <work> [--topic "<お題>"]
+                          --work <work> [--topic "<お題>"] [--overwrite]
+
+--overwrite: 既存の run を上書きで作り直す（別サフィックスの run は作らない）。
+  work の生成物（GENERATED）を消してから作り直す。消す前に入力と立場の検査を
+  済ませるので、検査で止まったときは何も消えない。旧台帳の行のうち、新しい
+  入力でも同じ入力ファイル (パスで照合) の中で本文 (context と text) が一字一句
+  同じ claim は、裁定を出現順に 1 対 1 で引き継ぐ（basis の CID は新しい番号へ付け替え。根拠の claim が 1 つでも消えた・
+  変わった解釈は引き継がず未裁定に戻して報告）。入力・立場ファイルが消す対象の
+  中にあれば何も消さずに止める。
+  本文が変わった claim は未裁定に戻る。証跡は消えるので fetch_sources.py から回し直す。
 """
 from __future__ import annotations
 
@@ -25,8 +34,10 @@ import argparse
 import datetime as _dt
 import hashlib
 import json
+import os
 import pathlib
 import re
+import shutil
 import sys
 import unicodedata
 
@@ -40,6 +51,13 @@ SENT_SPLIT_RE = re.compile(r"(?<=[。．!?！？])\s*")
 MIN_SENT = 25  # これ未満の断片は直前の claim へ寄せる (粒度が字数で揺れないように)
 
 DEFAULT_STANCE = pathlib.Path(__file__).resolve().parent.parent / "reference" / "stance_default.md"
+
+# init / fetch / report が work に書く生成物。--overwrite はこれだけを消す
+# （入力・意見 md・利用者が work に置いた他のファイルには触れない）。
+GENERATED = (
+    "manifest.json", "claims.json", "ledger.json", "stance.md", "section0.md",
+    "evidence.json", "evidence", "ledger_table.md", "sources.md",
+)
 
 LEDGER_FIELDS = {
     # --- 共通 -----------------------------------------------------------
@@ -240,18 +258,20 @@ def main() -> None:
     ap.add_argument("--stance", default="", help="立場ファイル (既定: reference/stance_default.md)")
     ap.add_argument("--work", required=True)
     ap.add_argument("--topic", default="", help="お題 (付録C §7 に出す)")
+    ap.add_argument("--overwrite", action="store_true",
+                    help="既存の work を上書きで作り直す。本文が同じ claim は裁定を引き継ぐ")
     args = ap.parse_args()
 
     work = pathlib.Path(args.work)
     work.mkdir(parents=True, exist_ok=True)
 
-    # --- 何も書く前に既存生成物を検査する (裁定済み台帳を壊さない) -------------
-    for name in ("ledger.json", "claims.json", "manifest.json"):
-        if (work / name).exists():
-            die(
-                f"{work/name} already exists — 上書きすると裁定済みの内容が消える。"
-                "作り直すなら work を明示的に消してから再実行すること"
-            )
+    # --- 何も書く前に既存生成物を検査する (裁定済み台帳を黙って壊さない) -------
+    existing = [n for n in ("ledger.json", "claims.json", "manifest.json") if (work / n).exists()]
+    if existing and not args.overwrite:
+        die(
+            f"{work/existing[0]} already exists — 既存の run を作り直すなら --overwrite を付ける"
+            "（本文が同じ claim の裁定は引き継がれる）。別サフィックスの run は作らない"
+        )
 
     stance_p = pathlib.Path(args.stance) if args.stance else DEFAULT_STANCE
     if not stance_p.is_file():
@@ -270,20 +290,95 @@ def main() -> None:
     paths = [pathlib.Path(n) for n in args.inputs]
     docs, claims = build_claims(paths)
 
+    # --- --overwrite: 旧台帳を読んでから生成物を消す (検査はすべて通過済み) ----
+    carried, dropped_basis = 0, []
+    # 新 claim の位置 -> 引き継ぐ旧行。同じ (context, text) が複数あるときは
+    # 出現順に 1 対 1 で対応させる (先頭の旧行へ寄せない)。
+    match: dict[int, dict] = {}
+    old_to_new: dict[str, str] = {}
+    if args.overwrite:
+        # 入力・立場が消す対象の中にあれば、何も消さずに止める
+        # シンボリックリンクを解決した形と、リンクのまま (abspath) の形の両方で見る
+        # （work/evidence/ に外部原本へのリンクを置いた場合も、リンクごと消えるので止める）
+        targets = {f(work / n) for n in GENERATED
+                   for f in (lambda q: q.resolve(), lambda q: pathlib.Path(os.path.abspath(q)))}
+        for src in [*paths, stance_p]:
+            for rp in (src.resolve(), pathlib.Path(os.path.abspath(src))):
+                t = next((t for t in targets if rp == t or t in rp.parents), None)
+                if t is not None:
+                    die(f"--overwrite: {src} は上書きで消える {t} の中にある — "
+                        "入力・立場ファイルを work の生成物の外へ移してから再実行すること（何も消していない）")
+    if args.overwrite and (work / "ledger.json").exists():
+        # 照合キーは (入力ファイルのパス, context, text)。N 番号は入力の並べ替えで変わるので使わず、
+        # 旧 claims.json の docs から旧行の入力パスを引く。パスは abspath で比べ、
+        # 改名・別 CWD からの相対指定などで一致しない入力の claim は引き継がない (未裁定に戻る)。
+        queues: dict[tuple[str, str, str], list[dict]] = {}
+        try:
+            old_ledger = json.loads((work / "ledger.json").read_text(encoding="utf-8"))
+            old_claims = json.loads((work / "claims.json").read_text(encoding="utf-8"))
+            # 旧入力の相対パスは旧 init 時の CWD (manifest の cwd) を基準に絶対化する。
+            # cwd の記録が無い旧 run では、相対パスの入力は引き継がない (取り違えるよりは未裁定)。
+            old_mani = json.loads((work / "manifest.json").read_text(encoding="utf-8"))
+            old_cwd = old_mani.get("cwd") if isinstance(old_mani, dict) else None
+            old_doc_path = {}
+            for d in old_claims.get("docs", []):
+                if os.path.isabs(d["path"]):
+                    old_doc_path[d["id"]] = os.path.abspath(d["path"])
+                elif isinstance(old_cwd, str) and old_cwd:
+                    old_doc_path[d["id"]] = os.path.abspath(os.path.join(old_cwd, d["path"]))
+            for r in old_ledger.get("rows", []):
+                op = old_doc_path.get(r.get("doc", ""))
+                if op is None:
+                    continue
+                queues.setdefault((op, r.get("context", ""), r.get("text", "")), []).append(r)
+        except (OSError, ValueError, AttributeError, KeyError, TypeError) as e:
+            die(f"--overwrite: 旧 {work/'ledger.json'} / {work/'claims.json'} / {work/'manifest.json'}"
+                f" が読めない ({e}) — 何も消していない")
+        new_doc_path = {d["id"]: os.path.abspath(d["path"]) for d in docs}
+        for i, c in enumerate(claims):
+            q = queues.get((new_doc_path[c["doc"]], c["context"], c["text"]))
+            if q:
+                o = q.pop(0)
+                match[i] = o
+                if o.get("id"):
+                    old_to_new[o["id"]] = c["id"]
+    if args.overwrite:
+        for name in GENERATED:
+            t = work / name
+            if t.is_symlink():
+                t.unlink()  # リンクだけを外す (リンク先には触れない。rmtree はリンクを拒否する)
+            elif t.is_dir():
+                shutil.rmtree(t)
+            elif t.exists():
+                t.unlink()
+
     claims_obj = {"docs": docs, "claims": claims}
     claims_bytes = json.dumps(claims_obj, ensure_ascii=False, sort_keys=True).encode("utf-8")
     (work / "claims.json").write_text(
         json.dumps(claims_obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
 
-    ledger = {
-        "rows": [
-            {"id": c["id"], "doc": c["doc"], "context": c["context"], "text": c["text"],
-             **{k: (v.copy() if isinstance(v, (dict, list)) else v)
-                for k, v in LEDGER_FIELDS.items()}}
-            for c in claims
-        ]
-    }
+    rows = []
+    for i, c in enumerate(claims):
+        row = {"id": c["id"], "doc": c["doc"], "context": c["context"], "text": c["text"],
+               **{k: (v.copy() if isinstance(v, (dict, list)) else v)
+                  for k, v in LEDGER_FIELDS.items()}}
+        o = match.get(i)
+        if o:
+            ob = o.get("basis") if isinstance(o.get("basis"), list) else []
+            lost = [b for b in ob if b not in old_to_new]
+            if lost:
+                # 根拠の claim が消えた・変わった解釈は、残りの basis だけで成り立つとは
+                # 限らないので引き継がず未裁定に戻す
+                dropped_basis += [f"{c['id']}:{b}" for b in lost]
+            else:
+                for k in LEDGER_FIELDS:
+                    if k in o:
+                        row[k] = o[k]
+                row["basis"] = [old_to_new[b] for b in ob]
+                carried += 1
+        rows.append(row)
+    ledger = {"rows": rows}
     (work / "ledger.json").write_text(
         json.dumps(ledger, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
@@ -312,6 +407,7 @@ def main() -> None:
                 "generated": _dt.datetime.now().astimezone().isoformat(timespec="seconds"),
                 "topic": args.topic,
                 "inputs": [str(p) for p in paths],
+                "cwd": os.getcwd(),  # --overwrite で旧入力の相対パスを解決する基準
                 "stance": str(stance_p),
                 "stance_raw_sha256": hashlib.sha256(stance_raw).hexdigest(),
                 "claims_sha256": hashlib.sha256(claims_bytes).hexdigest(),
@@ -326,6 +422,12 @@ def main() -> None:
     )
 
     print(f"OK: {len(docs)} inputs -> {len(claims)} claims")
+    if args.overwrite:
+        print(f"  overwrite: 裁定を引き継いだ claim {carried} 件 / 未裁定 {len(claims) - carried} 件"
+              " — 証跡は消したので fetch_sources.py から回し直す")
+        if dropped_basis:
+            print("  WARN: 根拠の claim が消えた・変わったため未裁定に戻した解釈"
+                  f"（新CID:旧basis）: {', '.join(dropped_basis)}")
     print(f"  {work/'claims.json'}\n  {work/'ledger.json'}\n  {work/'section0.md'}")
 
 
