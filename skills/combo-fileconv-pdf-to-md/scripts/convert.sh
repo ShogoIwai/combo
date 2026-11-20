@@ -17,7 +17,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # OCR helper: the shared ollama/ocr_to_md.sh (sibling of combo/ in the workspace).
 # Override with OCR_TO_MD if it lives elsewhere.
-OCR_TO_MD="${OCR_TO_MD:-$SCRIPT_DIR/../../../ollama/ocr_to_md.sh}"
+OCR_TO_MD="${OCR_TO_MD:-$SCRIPT_DIR/../../../../ollama/ocr_to_md.sh}"
 
 INPUT=""; OUTPUT=""; OCR_MODE="none"; PAGES=""; PASSWORD=""
 

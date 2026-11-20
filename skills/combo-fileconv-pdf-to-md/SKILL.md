@@ -40,7 +40,7 @@ reached.
 ## Usage
 
 ```bash
-S=<launch-root>/combo/skills/combo-fileconv-pdf-to-md/convert.sh
+S=<launch-root>/combo/skills/combo-fileconv-pdf-to-md/scripts/convert.sh
 
 # Text layer only (fast; the default)
 $S input.pdf [output.md]
@@ -112,7 +112,7 @@ preserved evidence: two deterministic scripts bracket one model step.
 | 3 gate | `pdf_check.py` | consistency checks against `blocks.jsonl`; exit 1 on FAIL |
 
 ```bash
-D=<launch-root>/combo/skills/combo-fileconv-pdf-to-md
+D=<launch-root>/combo/skills/combo-fileconv-pdf-to-md/scripts
 python3 $D/pdf_prepare.py input.pdf work/ [--pages N-M] [--password PW] [--dpi 150]
 # ... model writes work/structured.md ...
 python3 $D/pdf_check.py work/structured.md work/blocks.jsonl --report work/check.json

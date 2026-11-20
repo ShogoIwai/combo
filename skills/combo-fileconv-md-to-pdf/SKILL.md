@@ -48,17 +48,17 @@ npx puppeteer browsers install chrome   # one-time Chromium download
 
 ```bash
 # Single file  -> input.pdf (same directory)
-<launch-root>/combo/skills/combo-fileconv-md-to-pdf/convert.sh input.md
+<launch-root>/combo/skills/combo-fileconv-md-to-pdf/scripts/convert.sh input.md
 
 # Explicit output name
-<launch-root>/combo/skills/combo-fileconv-md-to-pdf/convert.sh input.md out/report.pdf
+<launch-root>/combo/skills/combo-fileconv-md-to-pdf/scripts/convert.sh input.md out/report.pdf
 
 # Batch: each file -> same-name .pdf
-<launch-root>/combo/skills/combo-fileconv-md-to-pdf/convert.sh docs/*.md
+<launch-root>/combo/skills/combo-fileconv-md-to-pdf/scripts/convert.sh docs/*.md
 
 # Override page/margin options (JSON, passed to md-to-pdf --pdf-options)
 PDF_OPTIONS='{"format":"A4","margin":"15mm"}' \
-  <launch-root>/combo/skills/combo-fileconv-md-to-pdf/convert.sh input.md
+  <launch-root>/combo/skills/combo-fileconv-md-to-pdf/scripts/convert.sh input.md
 ```
 
 `--pdf-options` is **always** passed to md-to-pdf. When `PDF_OPTIONS` is not
@@ -69,7 +69,7 @@ you deliberately want md-to-pdf's own defaults.
 ## Diagrams and visual QA
 
 ```bash
-T=<launch-root>/combo/skills/combo-fileconv-md-to-pdf
+T=<launch-root>/combo/skills/combo-fileconv-md-to-pdf/scripts
 $T/convert.sh --mermaid input.md out.pdf          # mermaid blocks -> inline SVG (mmdc)
 python3 $T/md_pdf_qa.py input.md out.pdf --mermaid  # checks + contact sheets
 ```

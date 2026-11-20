@@ -70,7 +70,7 @@ def sha256(path):
 def extractor_rev():
     try:
         rev = sh(["git", "-C", HERE, "rev-parse", "--short", "HEAD"], check=True).stdout.strip()
-        dirty = sh(["git", "-C", HERE, "status", "--porcelain", "--", "."], check=True).stdout.strip()
+        dirty = sh(["git", "-C", HERE, "status", "--porcelain", "--", ".."], check=True).stdout.strip()
         return rev + ("-dirty" if dirty else "")
     except Exception:
         return "unknown"
@@ -599,7 +599,7 @@ def main():
             draft.append("\n".join("> " + t.replace("\n", "<br>") for t in rest) + "\n")
 
     meta = {"type": "meta", "source": os.path.abspath(a.input), "sha256": sha256(a.input),
-            "extractor": "combo-fileconv-xlsx-to-md/xlsx_prepare.py", "extractor_rev": extractor_rev(),
+            "extractor": "combo-fileconv-xlsx-to-md/scripts/xlsx_prepare.py", "extractor_rev": extractor_rev(),
             "libs": {"openpyxl": openpyxl.__version__,
                      "libreoffice": (sh(["soffice", "--version"]).stdout.strip() if shutil.which("soffice") else None)},
             "sheets": want, "visible": visible, "notes": notes,

@@ -44,13 +44,13 @@ reached.
 
 ```bash
 # Basic conversion (text only)
-<launch-root>/combo/skills/combo-fileconv-docx-to-md/convert.sh input.docx [output.md]
+<launch-root>/combo/skills/combo-fileconv-docx-to-md/scripts/convert.sh input.docx [output.md]
 
 # With OCR for embedded images (requires Ollama running)
-<launch-root>/combo/skills/combo-fileconv-docx-to-md/convert.sh input.docx --ocr [output.md]
+<launch-root>/combo/skills/combo-fileconv-docx-to-md/scripts/convert.sh input.docx --ocr [output.md]
 
 # Also write source-addressed records (JSONL) for consistency checks
-<launch-root>/combo/skills/combo-fileconv-docx-to-md/convert.sh input.docx out.md --records out.records.jsonl
+<launch-root>/combo/skills/combo-fileconv-docx-to-md/scripts/convert.sh input.docx out.md --records out.records.jsonl
 ```
 
 `--records` does not change the Markdown. The file holds a `meta` line (source

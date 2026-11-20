@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""xlsx_to_md.py — body of combo-fileconv-xlsx-to-md/convert.sh.
+"""xlsx_to_md.py — body of combo-fileconv-xlsx-to-md/scripts/convert.sh.
 
 Usage:
     xlsx_to_md.py <input> <output.md|''> <list_only 0|1> [<records.jsonl>]
@@ -170,7 +170,7 @@ def _extractor_rev():
     try:
         rev = subprocess.run(['git', '-C', here, 'rev-parse', '--short', 'HEAD'],
                              capture_output=True, text=True, check=True).stdout.strip()
-        dirty = subprocess.run(['git', '-C', here, 'status', '--porcelain', '--', '.'],
+        dirty = subprocess.run(['git', '-C', here, 'status', '--porcelain', '--', '..'],
                                capture_output=True, text=True, check=True).stdout.strip()
         return rev + ('-dirty' if dirty else '')
     except Exception:
@@ -344,7 +344,7 @@ def write_records(input_path, records_path):
     stats['shapes'] = sum(1 for d in drawings if d['kind'] == 'shape')
     stats['images'] = sum(1 for d in drawings if d['kind'] == 'image')
     meta = {'type': 'meta', 'source': os.path.abspath(input_path), 'sha256': _sha256(input_path),
-            'extractor': 'combo-fileconv-xlsx-to-md/xlsx_to_md.py', 'extractor_rev': _extractor_rev(),
+            'extractor': 'combo-fileconv-xlsx-to-md/scripts/xlsx_to_md.py', 'extractor_rev': _extractor_rev(),
             'libs': {'openpyxl': _xl.__version__}, 'values': 'cached (not recalculated)', 'stats': stats}
     with open(records_path, 'w', encoding='utf-8') as f:
         f.write(json.dumps(meta, ensure_ascii=False) + '\n')

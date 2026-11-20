@@ -47,16 +47,16 @@ reached.
 
 ```bash
 # Basic conversion (all sheets → single .md file)
-<launch-root>/combo/skills/combo-fileconv-xlsx-to-md/convert.sh input.xlsx [output.md]
+<launch-root>/combo/skills/combo-fileconv-xlsx-to-md/scripts/convert.sh input.xlsx [output.md]
 
 # With OCR for embedded images (requires Ollama running)
-<launch-root>/combo/skills/combo-fileconv-xlsx-to-md/convert.sh input.xlsx --ocr [output.md]
+<launch-root>/combo/skills/combo-fileconv-xlsx-to-md/scripts/convert.sh input.xlsx --ocr [output.md]
 
 # Also write source-addressed records (JSONL); the Markdown is unchanged
-<launch-root>/combo/skills/combo-fileconv-xlsx-to-md/convert.sh input.xlsx out.md --records out.records.jsonl
+<launch-root>/combo/skills/combo-fileconv-xlsx-to-md/scripts/convert.sh input.xlsx out.md --records out.records.jsonl
 
 # Print the sheet names to stdout and exit (after the wrapper's banner lines)
-<launch-root>/combo/skills/combo-fileconv-xlsx-to-md/convert.sh input.xlsx --list-sheets
+<launch-root>/combo/skills/combo-fileconv-xlsx-to-md/scripts/convert.sh input.xlsx --list-sheets
 ```
 
 ## Procedure
@@ -100,7 +100,7 @@ side by side, flowcharts drawn with shapes — the default single table per
 sheet is unreadable. Same three stages as the PDF skill:
 
 ```bash
-T=<launch-root>/combo/skills/combo-fileconv-xlsx-to-md
+T=<launch-root>/combo/skills/combo-fileconv-xlsx-to-md/scripts
 python3 $T/xlsx_prepare.py book.xlsx work/ [--sheets A,B]   # deterministic
 # model: write work/structured.md from work/draft.md, layout.jsonl and the renders
 python3 $T/xlsx_check.py work/structured.md work/layout.jsonl  # gate, exit 1 on FAIL

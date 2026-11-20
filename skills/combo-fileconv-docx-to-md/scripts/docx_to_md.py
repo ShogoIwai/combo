@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""docx_to_md.py — body of combo-fileconv-docx-to-md/convert.sh.
+"""docx_to_md.py — body of combo-fileconv-docx-to-md/scripts/convert.sh.
 
 Walks the document body in source order (paragraphs and tables interleaved,
 including content inside body-level content controls) and writes Markdown.
@@ -196,7 +196,7 @@ def extractor_rev():
     try:
         rev = subprocess.run(["git", "-C", here, "rev-parse", "--short", "HEAD"],
                              capture_output=True, text=True, check=True).stdout.strip()
-        dirty = subprocess.run(["git", "-C", here, "status", "--porcelain", "--", "."],
+        dirty = subprocess.run(["git", "-C", here, "status", "--porcelain", "--", ".."],
                                capture_output=True, text=True, check=True).stdout.strip()
         return rev + ("-dirty" if dirty else "")
     except Exception:
@@ -262,7 +262,7 @@ def main():
 
     if a.records:
         meta = {"type": "meta", "source": os.path.abspath(a.input), "sha256": sha256(a.input),
-                "extractor": "combo-fileconv-docx-to-md/docx_to_md.py", "extractor_rev": extractor_rev(),
+                "extractor": "combo-fileconv-docx-to-md/scripts/docx_to_md.py", "extractor_rev": extractor_rev(),
                 "libs": {"python-docx": getattr(docx, "__version__", "?")},
                 "view": "accepted-changes"}
         with open(a.records, "w", encoding="utf-8") as f:

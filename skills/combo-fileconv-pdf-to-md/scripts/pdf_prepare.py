@@ -43,7 +43,7 @@ def sh(cmd, **kw):
 def extractor_rev():
     try:
         rev = sh(["git", "-C", HERE, "rev-parse", "--short", "HEAD"], check=True).stdout.strip()
-        dirty = sh(["git", "-C", HERE, "status", "--porcelain", "--", "."], check=True).stdout.strip()
+        dirty = sh(["git", "-C", HERE, "status", "--porcelain", "--", ".."], check=True).stdout.strip()
         return rev + ("-dirty" if dirty else "")
     except Exception:
         return "unknown"
@@ -180,7 +180,7 @@ def main():
 
     ver = (sh(["pdftotext", "-v"]).stderr.splitlines() or ["?"])[0]
     meta = {"type": "meta", "source": os.path.abspath(a.input), "sha256": sha256(a.input),
-            "extractor": "combo-fileconv-pdf-to-md/pdf_prepare.py", "extractor_rev": extractor_rev(),
+            "extractor": "combo-fileconv-pdf-to-md/scripts/pdf_prepare.py", "extractor_rev": extractor_rev(),
             "libs": {"poppler": ver}, "pages": [first, last], "total_pages": total, "dpi": a.dpi,
             "routes": dict(Counter(p["route"] for p in pages))}
     with open(os.path.join(a.workdir, "blocks.jsonl"), "w", encoding="utf-8") as f:

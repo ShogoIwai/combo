@@ -217,7 +217,7 @@ def docx_facts(path):
 
 def check_docx(res, src, out):
     md_path, rec = os.path.join(out, "out.md"), os.path.join(out, "records.jsonl")
-    rc, so, se = run(["bash", os.path.join(SKILLS, "combo-fileconv-docx-to-md/convert.sh"),
+    rc, so, se = run(["bash", os.path.join(SKILLS, "combo-fileconv-docx-to-md/scripts/convert.sh"),
                       src, md_path, "--records", rec])
     res.ok("exit", rc == 0 and "Traceback" not in se, se.strip()[-200:] if rc else "")
     if rc:
@@ -319,7 +319,7 @@ def xlsx_facts(path):
 
 def check_xlsx(res, src, out):
     md_path, rec = os.path.join(out, "out.md"), os.path.join(out, "records.jsonl")
-    rc, so, se = run(["bash", os.path.join(SKILLS, "combo-fileconv-xlsx-to-md/convert.sh"),
+    rc, so, se = run(["bash", os.path.join(SKILLS, "combo-fileconv-xlsx-to-md/scripts/convert.sh"),
                       src, md_path, "--records", rec])
     res.ok("exit", rc == 0 and "Error:" not in se and "Traceback" not in se, se.strip()[-200:])
     if rc:
@@ -362,7 +362,7 @@ def check_xlsx_layout(res, src, out):
     an invented one added, a flowchart edge rewired)."""
     if src.lower().endswith(".xls"):
         return
-    tool = os.path.join(SKILLS, "combo-fileconv-xlsx-to-md")
+    tool = os.path.join(SKILLS, "combo-fileconv-xlsx-to-md", "scripts")
     work = os.path.join(out, "layout")
     rc, so, se = run(["python3", os.path.join(tool, "xlsx_prepare.py"), src, work])
     res.ok("layout-prepare", rc == 0, (se or so).strip()[-200:])
@@ -423,7 +423,7 @@ def check_xlsx_layout(res, src, out):
 # ------------------------------------------------------------------ pdf
 def check_pdf(res, src, out, opts):
     md_path = os.path.join(out, "out.md")
-    rc, so, se = run(["bash", os.path.join(SKILLS, "combo-fileconv-pdf-to-md/convert.sh"),
+    rc, so, se = run(["bash", os.path.join(SKILLS, "combo-fileconv-pdf-to-md/scripts/convert.sh"),
                       src, md_path] + opts)
     res.ok("exit", rc == 0, se.strip()[-200:])
     if rc:
@@ -443,7 +443,7 @@ def check_pdf(res, src, out, opts):
 def check_pdf_structured(res, src, out, opts):
     """Structured-mode tooling: prepare, then the gate must pass the raw text as
     a trivially faithful conversion and must fail targeted corruptions of it."""
-    tool = os.path.join(SKILLS, "combo-fileconv-pdf-to-md")
+    tool = os.path.join(SKILLS, "combo-fileconv-pdf-to-md", "scripts")
     work = os.path.join(out, "prepare")
     rc, so, se = run(["python3", os.path.join(tool, "pdf_prepare.py"), src, work] + opts)
     res.ok("prepare", rc == 0, (se or so).strip()[-200:])
@@ -510,7 +510,7 @@ def check_md(res, src, out):
         res.add("md-to-pdf", "SKIP", "md-to-pdf not installed")
         return
     pdf = os.path.join(out, "out.pdf")
-    rc, so, se = run(["bash", os.path.join(SKILLS, "combo-fileconv-md-to-pdf/convert.sh"), src, pdf])
+    rc, so, se = run(["bash", os.path.join(SKILLS, "combo-fileconv-md-to-pdf/scripts/convert.sh"), src, pdf])
     res.ok("exit", rc == 0, se.strip()[-200:])
     if rc:
         return
@@ -529,7 +529,7 @@ def check_md(res, src, out):
     if not shutil.which("mmdc"):
         res.add("mermaid", "WARN", f"{mer} mermaid block(s) are rendered as code (mmdc not installed for --mermaid)")
         return
-    tool = os.path.join(SKILLS, "combo-fileconv-md-to-pdf")
+    tool = os.path.join(SKILLS, "combo-fileconv-md-to-pdf", "scripts")
     mpdf = os.path.join(out, "mermaid.pdf")
     rc, so, se = run(["bash", os.path.join(tool, "convert.sh"), "--mermaid", src, mpdf])
     res.ok("mermaid-exit", rc == 0, se.strip()[-200:])
