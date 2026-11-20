@@ -65,7 +65,7 @@ TIMEOUT = int(os.environ.get("CODEX_FORK_TIMEOUT", "1800"))
 # so usage_report.py can aggregate all sources.
 USAGE_LOG = (
     os.environ.get("CODEX_FORK_USAGE_LOG")
-    or os.path.join(os.path.dirname(os.path.abspath(__file__)), "usage_codex.log")
+    or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "usage_codex.log")
 )
 
 mcp = FastMCP("codex")

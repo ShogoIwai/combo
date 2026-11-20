@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Check that every combo skill's frontmatter helps auto-selection and leaks no local info.
 
-  python3 lint_skills.py            # check combo/skills/*/SKILL.md (exit 0 = PASS, 1 = FAIL)
-  python3 lint_skills.py <dir>...   # check the given skill dirs instead
+  python3 tools/lint_skills.py            # check combo/skills/*/SKILL.md (exit 0 = PASS, 1 = FAIL)
+  python3 tools/lint_skills.py <dir>...   # check the given skill dirs instead
 
 Both harnesses list every skill's `description` inside one shared character budget and
 pick a skill from that list alone (the SKILL.md body is not visible before the skill
@@ -36,7 +36,7 @@ import os
 import re
 import sys
 
-ROOT = os.path.dirname(os.path.realpath(__file__))
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 DESC_MAX = 400
 HOST_RE = r"\b[\w-]+(?:\.[\w-]+)*\.(?:local|lan|internal|corp|intra)\b(?!\.?[\w-])"
 IPV4_RE = r"\b(?!127\.|0\.0\.0\.0\b)(?:\d{1,3}\.){3}\d{1,3}\b"

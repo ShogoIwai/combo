@@ -69,7 +69,7 @@ TIMEOUT = int(os.environ.get("CLAUDE_FORK_TIMEOUT", "1800"))
 
 USAGE_LOG = (
     os.environ.get("CLAUDE_FORK_USAGE_LOG")
-    or os.path.join(os.path.dirname(os.path.abspath(__file__)), "usage_claude.log")
+    or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "usage_claude.log")
 )
 
 mcp = FastMCP("claude")

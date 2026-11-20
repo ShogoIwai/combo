@@ -21,14 +21,14 @@ Two views:
     live monitoring of forks as they land.
 
 Examples:
-    python3 usage_report.py                      # aggregate by source / tool
-    python3 usage_report.py --by repo            # which repos get forked into
-    python3 usage_report.py --by day             # per-day volume
-    python3 usage_report.py --tail 20            # last 20 calls, newest last
-    python3 usage_report.py --watch              # live tail, refresh every 3s
-    python3 usage_report.py --watch 10 --tail 30 # refresh every 10s, 30 rows
-    python3 usage_report.py --json               # machine-readable aggregate
-    python3 usage_report.py usage_codex.log      # one explicit log
+    python3 tools/usage_report.py                      # aggregate by source / tool
+    python3 tools/usage_report.py --by repo            # which repos get forked into
+    python3 tools/usage_report.py --by day             # per-day volume
+    python3 tools/usage_report.py --tail 20            # last 20 calls, newest last
+    python3 tools/usage_report.py --watch              # live tail, refresh every 3s
+    python3 tools/usage_report.py --watch 10 --tail 30 # refresh every 10s, 30 rows
+    python3 tools/usage_report.py --json               # machine-readable aggregate
+    python3 tools/usage_report.py usage_codex.log      # one explicit log
 """
 
 import argparse
@@ -177,7 +177,7 @@ def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    here = os.path.dirname(os.path.abspath(__file__))
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # logs live in combo/
     ap.add_argument(
         "logfiles", nargs="*",
         default=[os.path.join(here, n) for n in DEFAULT_LOGS],

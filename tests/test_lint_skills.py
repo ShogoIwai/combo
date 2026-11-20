@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for combo/lint_skills.py (run without arguments)."""
+"""Regression tests for combo/tools/lint_skills.py (run without arguments)."""
 
 import contextlib
 import io
@@ -10,7 +10,7 @@ import tempfile
 import unittest
 
 sys.dont_write_bytecode = True
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"))
 import lint_skills as ls  # noqa: E402
 
 GOOD = "Use when converting X to Y. Triggers — 「X を Y にして」「x to y」."

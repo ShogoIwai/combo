@@ -51,16 +51,16 @@ The whole design rests on five facts about this environment:
 | File                 | Role                                                                                                                                                                                                   |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `up_version.csh`   | Reinstall Claude Code + Codex CLIs to latest (`npm i -g @anthropic-ai/claude-code@latest @openai/codex@latest`).                                                                                     |
-| `mcp_codex.py`     | MCP server giving**Claude Code** a fork into cloud **Codex** (`fork_to_codex` / `ask_codex`) + `web_rag`, each pinned to one repo as its sandbox.                                    |
-| `mcp_claude.py`    | MCP server giving**Codex** (or another Claude Code) a fork into a one-shot headless **`claude -p`** (`fork_to_claude` / `ask_claude`) + `web_rag`.                                 |
-| `usage_report.py`  | Monitor the cross-fork MCP traffic from the two JSONL logs — aggregate table or live stream (see[Monitoring the traffic](#monitoring-the-traffic)).                                                      |
+| `tools/mcp_codex.py`     | MCP server giving**Claude Code** a fork into cloud **Codex** (`fork_to_codex` / `ask_codex`) + `web_rag`, each pinned to one repo as its sandbox.                                    |
+| `tools/mcp_claude.py`    | MCP server giving**Codex** (or another Claude Code) a fork into a one-shot headless **`claude -p`** (`fork_to_claude` / `ask_claude`) + `web_rag`.                                 |
+| `tools/usage_report.py`  | Monitor the cross-fork MCP traffic from the two JSONL logs — aggregate table or live stream (see[Monitoring the traffic](#monitoring-the-traffic)).                                                      |
 | `usage_codex.log`  | JSONL usage records written by `mcp_codex.py` (gitignored).                                                                                                                                          |
 | `usage_claude.log` | JSONL usage records written by `mcp_claude.py` (gitignored).                                                                                                                                         |
 | `link_skills.sh`   | Idempotent bootstrap that symlinks each `combo/skills/<name>` into the harnesses' **user-global** search paths by prefix: `combo-claude-*` → `~/.claude/skills` only, `combo-codex-*` → `~/.agents/skills` only, other `combo-*` → both.                                          |
 | `skills/`          | **Combo skills** source of truth — one dir per skill (`combo-<name>/SKILL.md`), symlinked into both harnesses; harness-specific ones (`combo-claude-<name>` / `combo-codex-<name>`) into that one harness only (see [Skill sharing across both harnesses](#skill-sharing-across-both-harnesses)). |
 | `hooks/`           | **Claude Code hook** scripts (`stop_rg_cleanup.sh`, `session_end_cleanup.sh`) called from `~/.claude/settings.json` (see [Claude Code hooks](#claude-code-hooks-combohooks)).                 |
-| `lint_skills.py`   | Checks every `skills/*/SKILL.md` frontmatter for auto-selection and privacy: one-line `description` of at most 400 chars, a 「…」 trigger phrase, strict-YAML-safe plain text, and no local information (absolute paths, IPs, e-mails, private host names) in the description or in any file under the skill. Exit 1 on any failure (see [`description` rules](#description-rules)). |
-| `tests/skills/`   | Regression tests for `lint_skills.py` (`python3 tests/skills/test_lint_skills.py`). |
+| `tools/lint_skills.py`   | Checks every `skills/*/SKILL.md` frontmatter for auto-selection and privacy: one-line `description` of at most 400 chars, a 「…」 trigger phrase, strict-YAML-safe plain text, and no local information (absolute paths, IPs, e-mails, private host names) in the description or in any file under the skill. Exit 1 on any failure (see [`description` rules](#description-rules)). |
+| `tests/test_lint_skills.py` | Regression tests for `tools/lint_skills.py` (`python3 tests/test_lint_skills.py`). |
 | `tests/fileconv/` | Regression checks for `skills/combo-fileconv-*` (`run_regression.py` over a local, gitignored corpus; `corpus.example.tsv` shows the format); compatibility policy and acceptance criteria in its `README.md`. |
 
 ### Dependency
@@ -186,10 +186,10 @@ with no purpose.
 
 ```bash
 # In Claude Code: register ONLY the codex fork (reaches the other agent).
-claude mcp add -s user codex python3 $REP/combo/mcp_codex.py
+claude mcp add -s user codex python3 $REP/combo/tools/mcp_codex.py
 
 # In Codex: register ONLY the claude fork (reaches the other agent).
-codex mcp add claude -- python3 $REP/combo/mcp_claude.py
+codex mcp add claude -- python3 $REP/combo/tools/mcp_claude.py
 ```
 
 - Claude Code → registers **`codex`** (`mcp_codex.py`). It does **not** register
@@ -261,7 +261,7 @@ After registering `claude`, add `tool_timeout_sec` to its **existing** section i
 ```toml
 [mcp_servers.claude]
 command = "python3"
-args = ["<launch-root>/combo/mcp_claude.py"] # replace <launch-root> with its absolute path
+args = ["<launch-root>/combo/tools/mcp_claude.py"] # replace <launch-root> with its absolute path
 tool_timeout_sec = 1860 # 31 minutes; child process limit is 30 minutes
 ```
 
@@ -310,11 +310,11 @@ two views:
 **Aggregate (default)** — one row per group, the at-a-glance health table:
 
 ```bash
-python3 usage_report.py                 # by source / tool (default)
-python3 usage_report.py --by repo       # which repos get forked into most
-python3 usage_report.py --by day        # per-day volume
-python3 usage_report.py --by source     # codex vs claude totals
-python3 usage_report.py --json          # machine-readable
+python3 tools/usage_report.py                 # by source / tool (default)
+python3 tools/usage_report.py --by repo       # which repos get forked into most
+python3 tools/usage_report.py --by day        # per-day volume
+python3 tools/usage_report.py --by source     # codex vs claude totals
+python3 tools/usage_report.py --json          # machine-readable
 ```
 
 All `--by` groupings: `source`, `tool`, `repo`, `day`, `source-tool` (default),
@@ -338,9 +338,9 @@ what matter for cloud forks, since tokens are unavailable.
 **Stream / live monitor** — the most recent calls, one per line, errors flagged:
 
 ```bash
-python3 usage_report.py --tail 20       # last 20 calls, newest last
-python3 usage_report.py --watch         # live, refresh every 3s (Ctrl-C stops)
-python3 usage_report.py --watch 10 --tail 30   # every 10s, 30 rows
+python3 tools/usage_report.py --tail 20       # last 20 calls, newest last
+python3 tools/usage_report.py --watch         # live, refresh every 3s (Ctrl-C stops)
+python3 tools/usage_report.py --watch 10 --tail 30   # every 10s, 30 rows
 ```
 
 ```
@@ -560,7 +560,7 @@ names, which are then never picked from context. Write each `description` so tha
   pushed to a remote and linked into every repo; anything machine- or org-specific
   belongs in the body's placeholders (`<launch-root>`) or in a repo-specific skill.
 
-Run `python3 lint_skills.py` after adding or editing a skill (exit 0 = PASS). It also
+Run `python3 tools/lint_skills.py` after adding or editing a skill (exit 0 = PASS). It also
 scans every file under each skill directory for home / mount paths, IPs, e-mail
 addresses and internal host names. Organisation names and personal details cannot be
 detected by pattern — check those by hand.
