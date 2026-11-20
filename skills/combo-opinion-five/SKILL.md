@@ -1,6 +1,6 @@
 ---
 name: combo-opinion-five
-description: 事実・解釈・価値観が混ざった自分のテキスト（走り書き、モヤモヤ、SNS 下書き、社内メールの草稿など）を入力に、羽田康祐『意見をつくる』の FIVE フレームワーク（Fact 事実 / Interpretation 解釈 / Value 価値基準 / Expression 表明）で分解し直し、事実部分は Web で裏取りして補完したうえで、単一の Markdown「意見」にまとめる。立場は既定で「日本人・ASIC ベンダー勤務・妻と子の 3 人家族」（reference/stance_default.md、--stance で差し替え可）。「意見にまとめて」「FIVE フレームワークで整理して」「このモヤモヤを意見にして」「事実と解釈と価値観を分けて」「自分の意見をつくって」「opinion from my notes」等で起動。
+description: 事実・解釈・価値観が混ざった自分のテキスト（走り書き・SNS 下書き・メールの草稿など）を、FIVE フレームワーク（羽田康祐『意見をつくる』）で事実・解釈・価値基準・表明に分解し直し、事実は Web で裏取りして、単一の Markdown「意見」にまとめる（立場は --stance で差し替え可）。「意見にまとめて」「FIVE フレームワークで整理して」「このモヤモヤを意見にして」「事実と解釈と価値観を分けて」「opinion from my notes」等で起動。英語の練習用スクリプトにするのは combo-english-listening-script。
 allowed-tools: Read, Write, Edit, Bash, WebSearch, WebFetch, mcp__codex__web_rag, mcp__codex__ask_codex
 ---
 
@@ -17,7 +17,7 @@ reached.
 | Item | Content |
 | ---- | ------- |
 | **What it does** | 入力テキストを claim 単位に切り出し、1 件ずつ **F（事実）/ I（解釈）/ V（価値基準）** に裁定する。F は公開情報で裏取りし CONFIRMED / CORRECTED / PARTIAL / PRIVATE_PRIMARY / UNVERIFIED を付けて言い直す。I は「どの事実に乗っているか」と「同じ事実から出る別の解釈」を必ず持たせ、V は「軸・立場から来た由来・捨てるもの」を書かせる。その上で **E（表明）** として、意見・根拠・前提の価値基準・自分の行動・**この意見が変わる条件**を書く。 |
-| **Input** | 事実・解釈・価値観が混ざった自分のテキスト（txt/md）1 つ以上。立場ファイルは任意（既定 `reference/stance_default.md` = 日本人 / ASIC ベンダー勤務 / 妻と子の 3 人家族）。 |
+| **Input** | 事実・解釈・価値観が混ざった自分のテキスト（txt/md）1 つ以上。立場ファイルは任意（既定 `reference/stance_default.md`。中身は自分の立場に書き換えるか、`--stance` で別ファイルを渡す）。 |
 | **type** | `one-shot`（意見 md）＋ `incremental`（`work/ledger.json` の裁定、`work/evidence*` は追記・更新して残す） |
 | **Output** | 1 run = 1 ディレクトリ `<base>/opinion_<slug>_<yymmdd>/`（`<base>` 既定は CWD 直下の `work/`）。その**中に**意見 md `opinion_<slug>_<yymmdd>.md`（ディレクトリ名と同名）と、根拠となる中間ファイル置き場 `work/`（`claims.json` / `ledger.json` / `evidence.json` / `evidence/*.txt` / `section0.md` / `ledger_table.md` / `sources.md` / `stance.md`）を置く。詳細は「出力レイアウト」。 |
 | **goal** | 出力 md が存在し、`scripts/check_opinion.py check` の 19 ゲートが全 PASS すること。 |

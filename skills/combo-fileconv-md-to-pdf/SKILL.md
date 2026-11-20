@@ -1,6 +1,6 @@
 ---
 name: combo-fileconv-md-to-pdf
-description: Convert Markdown (.md) files to PDF with correct Japanese, code blocks and tables via md-to-pdf (Chromium rendering, no LaTeX). Triggers on "mdをPDF化", "markdown to pdf", "md→pdf", "PDFに変換".
+description: Use when converting Markdown (.md) to PDF with correct Japanese, code blocks and tables via md-to-pdf (Chromium rendering, no LaTeX). Triggers — 「mdをPDF化して」「PDFに変換して」「md→pdf」「markdown to pdf」.
 ---
 # combo-fileconv-md-to-pdf — convert Markdown to PDF
 

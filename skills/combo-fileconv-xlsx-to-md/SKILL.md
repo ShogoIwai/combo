@@ -1,6 +1,6 @@
 ---
 name: combo-fileconv-xlsx-to-md
-description: Convert .xlsx/.xlsm/.xls spreadsheets to Markdown tables, optionally OCR-ing embedded images. Use when spreadsheet data must become reviewable, Git-friendly Markdown.
+description: Use when spreadsheets (.xlsx/.xlsm/.xls) must become reviewable, Git-friendly Markdown tables, optionally OCR-ing embedded images. Triggers — 「xlsxをmdにして」「Excelをマークダウンに」「xlsx to markdown」.
 ---
 # combo-fileconv-xlsx-to-md — convert a spreadsheet to Markdown tables
 

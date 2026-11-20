@@ -265,7 +265,7 @@ def main() -> None:
         die(f"{stance_p} に `## {ANCHOR_HEADING}` 配下の箇条書きが 2 件未満 — "
             "価値基準の由来と表明が『この立場に固有か』を検査できない。"
             f"reference/stance_default.md の `## {ANCHOR_HEADING}` を見て、"
-            "自分の立場を指す語（例: ASIC ベンダー / 妻と子）を 2 件以上列挙すること")
+            "自分の立場を指す語（例: 職種 / 家族構成）を 2 件以上列挙すること")
 
     paths = [pathlib.Path(n) for n in args.inputs]
     docs, claims = build_claims(paths)

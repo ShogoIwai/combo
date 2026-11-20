@@ -1,6 +1,6 @@
 ---
 name: combo-notion-mcp-recovery
-description: Use when recovering Codex Notion MCP startup/auth failures, especially "MCP client for `notion` failed to start", missing Notion tools, expired OAuth, cancelled Notion MCP calls in Codex forks, or Japanese requests about Codex notion mcp error recovery / notion mcp 復旧.
+description: Use when the Codex Notion MCP fails to start or authenticate — "MCP client for `notion` failed to start", missing Notion tools, expired OAuth, or cancelled Notion MCP calls in Codex forks. Triggers — 「notion mcp 復旧」「Codex の Notion MCP エラーを直して」「notion mcp error recovery」.
 ---
 
 # combo-notion-mcp-recovery — Codex Notion MCP の復旧

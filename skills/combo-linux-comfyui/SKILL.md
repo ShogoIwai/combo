@@ -1,6 +1,6 @@
 ---
 name: combo-linux-comfyui
-description: Use when setting up or operating a command-line (no GUI) image-generation environment on Linux with ComfyUI and an NVIDIA GPU — installing ComfyUI, fetching SDXL / Illustrious / NoobAI checkpoints and LoRAs from Civitai / Hugging Face with sha256 checks, turning TensorArt or A1111 generation settings (model, LoRA weights, sampler, scheduler, steps, CFG, clip skip, size) into a reusable preset, expanding a base prompt with per-item templates (place / action / negative) into prompt files, and generating images from prompt files. Japanese triggers — 「ComfyUI を入れて」「ComfyUI をコマンドラインで使いたい」「TensorArt の設定をローカルで再現」「TensorArt と同じ設定で画像生成」「Illustrious / NoobAI をローカルで動かす」「LoRA を落としてプリセットに入れて」「プロンプトファイルから画像生成」「テンプレートでプロンプトを差し替えて量産」「prompts から inputs を作って」「comfyui setup」「comfyui cli」.
+description: Use when setting up or running a CLI-only ComfyUI image-generation environment on Linux with an NVIDIA GPU — installing ComfyUI, fetching checkpoints and LoRAs from Civitai / Hugging Face, turning TensorArt or A1111 settings into a preset, and generating images from templated prompt files. Triggers — 「ComfyUI を入れて」「TensorArt の設定をローカルで再現」「LoRA を落としてプリセットに入れて」「プロンプトファイルから画像生成」「comfyui cli」.
 ---
 
 # combo-linux-comfyui — ComfyUI をコマンドラインで使う画像生成環境

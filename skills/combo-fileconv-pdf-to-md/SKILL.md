@@ -1,6 +1,6 @@
 ---
 name: combo-fileconv-pdf-to-md
-description: Convert a .pdf (datasheet, spec, scanned document) to page-by-page Markdown, using the text layer and optionally OCR-ing pages that have none; an opt-in structured mode rebuilds headings and tables with the model and checks the result against the text layer. Use when a PDF must become searchable/reviewable Markdown.
+description: Use when a PDF (datasheet, spec, scanned document) must become page-by-page Markdown — text layer first, optional OCR for pages without one, and an opt-in structured mode that rebuilds headings and tables and checks them against the text layer. Triggers — 「PDFをmdにして」「PDFをマークダウンに」「pdf to markdown」.
 ---
 # combo-fileconv-pdf-to-md — convert a .pdf document to Markdown
 

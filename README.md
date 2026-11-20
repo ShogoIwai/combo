@@ -59,6 +59,8 @@ The whole design rests on five facts about this environment:
 | `link_skills.sh`   | Idempotent bootstrap that symlinks each `combo/skills/<name>` into the harnesses' **user-global** search paths by prefix: `combo-claude-*` → `~/.claude/skills` only, `combo-codex-*` → `~/.agents/skills` only, other `combo-*` → both.                                          |
 | `skills/`          | **Combo skills** source of truth — one dir per skill (`combo-<name>/SKILL.md`), symlinked into both harnesses; harness-specific ones (`combo-claude-<name>` / `combo-codex-<name>`) into that one harness only (see [Skill sharing across both harnesses](#skill-sharing-across-both-harnesses)). |
 | `hooks/`           | **Claude Code hook** scripts (`stop_rg_cleanup.sh`, `session_end_cleanup.sh`) called from `~/.claude/settings.json` (see [Claude Code hooks](#claude-code-hooks-combohooks)).                 |
+| `lint_skills.py`   | Checks every `skills/*/SKILL.md` frontmatter for auto-selection and privacy: one-line `description` of at most 400 chars, a 「…」 trigger phrase, strict-YAML-safe plain text, and no local information (absolute paths, IPs, e-mails, private host names) in the description or in any file under the skill. Exit 1 on any failure (see [`description` rules](#description-rules)). |
+| `tests/skills/`   | Regression tests for `lint_skills.py` (`python3 tests/skills/test_lint_skills.py`). |
 | `tests/fileconv/` | Regression checks for `skills/combo-fileconv-*` (`run_regression.py` over a local, gitignored corpus; `corpus.example.tsv` shows the format); compatibility policy and acceptance criteria in its `README.md`. |
 
 ### Dependency
@@ -527,7 +529,7 @@ relevant) rather than what it does — that text drives auto-selection:
 ```markdown
 ---
 name: combo-rtl-review
-description: Use when reviewing RTL changes for reset, clocking, interface timing, CDC risks, and missing tests.
+description: Use when reviewing RTL changes for reset, clocking, interface timing, CDC risks, and missing tests. Triggers — 「RTL をレビューして」「CDC リスクを見て」「review RTL changes」.
 ---
 
 # RTL Review
@@ -537,6 +539,31 @@ description: Use when reviewing RTL changes for reset, clocking, interface timin
 4. Identify missing or stale tests.
 5. Report findings first, with file:line references.
 ```
+
+#### `description` rules
+
+Neither harness sees the body before a skill fires: auto-selection reads only the
+`description` list, and that list shares **one character budget across every
+installed skill** (combo, repo-specific and built-in ones together). A long
+`description` uses up the budget and pushes later skills out of the list as bare
+names, which are then never picked from context. Write each `description` so that:
+
+- it is **one line, at most 400 characters** — steps, gates and mode details go in the
+  body, not here;
+- it says **what goes in and what comes out** in one sentence, then the **trigger
+  phrases** users actually type (JP in 「…」, EN alongside), then **which neighbouring
+  skill to use instead** when the request is close but different;
+- it is **plain YAML text**: no leading quote or indicator, no `: ` or ` #` (use a
+  full-width colon or an em dash — strict parsers in the other harness reject them);
+- it carries **no local information** — no absolute or home paths, IPs, e-mail
+  addresses, internal host names, organisation or personal details. This repo is
+  pushed to a remote and linked into every repo; anything machine- or org-specific
+  belongs in the body's placeholders (`<launch-root>`) or in a repo-specific skill.
+
+Run `python3 lint_skills.py` after adding or editing a skill (exit 0 = PASS). It also
+scans every file under each skill directory for home / mount paths, IPs, e-mail
+addresses and internal host names. Organisation names and personal details cannot be
+detected by pattern — check those by hand.
 
 #### Path convention — anchor on `<launch-root>`
 

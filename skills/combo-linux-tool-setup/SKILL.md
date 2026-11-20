@@ -1,6 +1,6 @@
 ---
 name: combo-linux-tool-setup
-description: Use when installing, updating, checking, or removing user-level Linux CLI tools on this host (initially nvm / Node.js LTS / Claude Code / Codex / Python 3 built with pyenv python-build / slang SystemVerilog compiler / Universal Ctags), or when adding/removing a tool from the managed set. Japanese triggers — 「ツールをセットアップして」「Claude Code / Codex を入れて」「codex を更新して」「node を最新 LTS に」「nvm 入れて」「python3 を入れて」「pyenv で python をビルドして」「slang を入れて」「slang を更新して」「ctags-universal を入れて」「universal-ctags を入れて」「ツールの状態を確認」「セットアップ対象にツールを追加」「linux tool setup」.
+description: Use when installing, updating, checking or removing user-level Linux CLI tools on this host (nvm / Node.js LTS / Claude Code / Codex / pyenv-built Python 3 / slang / Universal Ctags), or when adding or removing a tool from the managed set. Triggers — 「ツールをセットアップして」「Claude Code / Codex を入れて」「codex を更新して」「node を最新 LTS に」「python3 を入れて」「slang を入れて」「ツールの状態を確認」「linux tool setup」.
 ---
 
 # combo-linux-tool-setup — Linux 汎用ツールセットアップ

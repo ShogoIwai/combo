@@ -1,6 +1,6 @@
 ---
 name: combo-fileconv-docx-to-md
-description: Convert .docx design specs to markdown, optionally OCR-ing embedded images. Use when a .docx must become searchable/reviewable Markdown.
+description: Use when a Word (.docx) document must become searchable/reviewable Markdown, optionally OCR-ing embedded images. Triggers — 「docxをmdにして」「Wordをマークダウンに」「docx to markdown」.
 ---
 # combo-fileconv-docx-to-md — convert a .docx document to Markdown
 
