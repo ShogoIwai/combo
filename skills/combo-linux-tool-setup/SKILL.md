@@ -1,6 +1,6 @@
 ---
 name: combo-linux-tool-setup
-description: Use when installing, updating, checking or removing user-level Linux CLI tools on this host (nvm / Node.js LTS / Claude Code / Codex / pyenv-built Python 3 / slang / Universal Ctags), or when adding or removing a tool from the managed set. Triggers — 「ツールをセットアップして」「Claude Code / Codex を入れて」「codex を更新して」「node を最新 LTS に」「python3 を入れて」「slang を入れて」「ツールの状態を確認」「linux tool setup」.
+description: Use when installing, updating, checking or removing user-level Linux CLI tools on this host (nvm / Node.js LTS / Claude Code / Codex / pyenv-built Python 3 / slang / Universal Ctags / nsxiv・sxiv and its delete key-handler), or when adding or removing a tool from the managed set. Triggers — 「ツールをセットアップして」「Claude Code / Codex を入れて」「codex を更新して」「node を最新 LTS に」「python3 を入れて」「slang を入れて」「nsxiv を入れて」「sxiv の key-handler を置いて」「ツールの状態を確認」「linux tool setup」.
 ---
 
 # combo-linux-tool-setup — Linux 汎用ツールセットアップ
@@ -8,7 +8,7 @@ description: Use when installing, updating, checking or removing user-level Linu
 ユーザー領域(`$HOME` 配下)の CLI ツールを、**ツール定義ファイル 1 本＝ 1 ツール**の
 データ駆動で導入・更新・削除する。対象は `tools/<name>.sh` を足す／消すだけで増減する。
 初期の対象は **Claude Code / Codex** と、その土台の **nvm / node**、および **python3**(pyenv の python-build でビルド)、**slang**(GitHub リリースのバイナリ。既定 v11.0 固定)、
-**ctags-universal**(OS パッケージ。導入・更新・削除は sudo 依頼)。
+**ctags-universal**(OS パッケージ。導入・更新・削除は sudo 依頼)、**nsxiv**(nsxiv / sxiv の OS パッケージ＋削除用 key-handler)。
 
 原則: **goal が満たされなければ完了とせず、同じタスクを loop する。**
 **sudo は絶対に自分で実行しない。** root 権限が要る操作はユーザーに実行を依頼する。
@@ -23,7 +23,7 @@ description: Use when installing, updating, checking or removing user-level Linu
 | **入力**        | 対象ツール名(省略時は status で全件)、操作(install / update / remove / ツール定義の追加・変更)。`bash`・`curl`・`git` が使えること(無ければ sudo 依頼)。python3 を導入・入れ替えるときは**ユーザーが指定する導入先パスと版**(`PYTHON_PREFIX` / `PYTHON_VERSION`) |
 | **type**        | `リカーシブ`(導入済みの状態を読み、差分だけ手を入れる。導入済み・最新のものには触れない) |
 | **出力**        | 導入・更新されたツール、`~/.cshrc` の管理ブロック(node / python3。変更時は `~/.cshrc.bak.<日時>.<pid>`)、追加・変更した `tools/<name>.sh`、ユーザーへの依頼(SUDO_REQUEST / NEXT_STEPS) |
-| **goal**        | 操作ごとに判定し、すべての場合で `toolsetup.sh lint` が `lint OK`。変更系(install / update / remove)は**本実行(`--dry-run` なし)が exit 0** であることが前提で、exit 3/4/5 は status に関係なく未完了(待ち・引き継ぎ。手順 5)。**install**: 加えて依頼された各ツールの `status` が `missing` でない(設定同期まで成功。導入済みの旧版は更新しないので `outdated` のままでも可)。**update**: 加えて `status` が `ok`。**remove**: 加えて `status` が `missing`(python3 は管理外の python3 が残るので、代わりに `.cshrc` に python3 の管理ブロックが無く、消した `<path>/python-<ver>` が無いこと。ctags-universal は手で入れた Universal Ctags が残り得るので、代わりに OS パッケージが入っていないこと = `dpkg-query -W universal-ctags` で導入済みでないこと)。**status のみ**: 実行して状態を報告できたこと(`missing` / `outdated` は直さない)。最新版が取れず `ok(latest unknown)` のときは、導入は確認できたが最新かは確認できなかった旨を報告する(update では `検証不能`) |
+| **goal**        | 操作ごとに判定し、すべての場合で `toolsetup.sh lint` が `lint OK`。変更系(install / update / remove)は**本実行(`--dry-run` なし)が exit 0** であることが前提で、exit 3/4/5 は status に関係なく未完了(待ち・引き継ぎ。手順 5)。**install**: 加えて依頼された各ツールの `status` が `missing` でない(設定同期まで成功。導入済みの旧版は更新しないので `outdated` のままでも可)。**update**: 加えて `status` が `ok`。**remove**: 加えて `status` が `missing`(python3 は管理外の python3 が残るので、代わりに `.cshrc` に python3 の管理ブロックが無く、消した `<path>/python-<ver>` が無いこと。ctags-universal は手で入れた Universal Ctags が残り得るので、代わりに OS パッケージが入っていないこと = `dpkg-query -W universal-ctags` で導入済みでないこと。nsxiv は OS パッケージ(nsxiv / sxiv)が入っておらず、管理行つきの key-handler が残っていないこと)。nsxiv の install / update は加えて、`~/.config/nsxiv/exec/key-handler` と `~/.config/sxiv/exec/key-handler` の両方が実行可能(`test -x`)で管理行を含むこと**status のみ**: 実行して状態を報告できたこと(`missing` / `outdated` は直さない)。最新版が取れず `ok(latest unknown)` のときは、導入は確認できたが最新かは確認できなかった旨を報告する(update では `検証不能`) |
 | **検証**        | `scripts/toolsetup.sh status <tool...>` と `scripts/toolsetup.sh lint` を実際に実行した出力と、変更系(install / update / remove)の本実行の終了コード |
 | **loop 上限**   | 3 回 |
 
@@ -36,7 +36,7 @@ description: Use when installing, updating, checking or removing user-level Linu
 | `TS status [tool...]` | 導入版・最新版・状態(`ok` / `outdated` / `missing`) |
 | `TS install <tool...>` | 依存ごと導入。導入済みは版を変えず、設定同期(`tool_sync`)だけ行う |
 | `TS update <tool...>` | 指定ツールを最新へ。依存は未導入なら導入のみ(勝手に更新しない) |
-| `TS remove <tool...> --yes` | 削除。導入済み(または設定が残っている)依存元があれば拒否。未導入で設定だけ残るツールは後始末だけ行う。`tool_owned` を持つツール(python3 / slang / ctags-universal)は、このスキルが入れた分だけを消し、管理外の導入物は据え置く。root 権限が要る削除(ctags-universal)は `tool_remove` が積んだ sudo 依頼を出して exit 3。削除後に導入版か設定が残れば失敗 |
+| `TS remove <tool...> --yes` | 削除。導入済み(または設定が残っている)依存元があれば拒否。未導入で設定だけ残るツールは後始末だけ行う。`tool_owned` を持つツール(python3 / slang / ctags-universal / nsxiv)は、このスキルが入れた分だけを消し、管理外の導入物は据え置く。root 権限が要る削除(ctags-universal / nsxiv)は `tool_remove` が積んだ sudo 依頼を出して exit 3。削除後に導入版か設定が残れば失敗 |
 | `TS lint` | `tools/*.sh` の定義検査(必須関数・依存の実在・sudo 直書き禁止・構文) |
 | `--dry-run` | 変更系コマンドと `.cshrc` の差分を表示だけする。ファイル・`~/.nvm` の状態も変えない。未導入の依存は「導入予定」として計画を最後まで流す |
 
@@ -250,6 +250,30 @@ description: Use when installing, updating, checking or removing user-level Linu
   apt 以外の環境では `ok(latest unknown)` で、update しても判定できないので `検証不能` として報告する。
 - 管理するのは **OS パッケージだけ**(`tool_owned`。rpm 系は PATH 上の Universal Ctags の実体を `ctags` パッケージが所有するときだけ)。パッケージ外で手で入れた Universal Ctags しか無いときは
   導入済み・`ok(latest unknown)` として据え置き、update も remove も何もしない(apt の依頼を出さない)。
+
+---
+
+## nsxiv(nsxiv / sxiv の OS パッケージ＋削除用 key-handler)
+
+- 導入確認は PATH 上の `nsxiv`、次に `sxiv` の `-v`(`nsxiv <版>` / `sxiv <版>` で始まる出力が取れた最初のものを使う)。
+  未導入なら install は `sudo apt-get install -y nsxiv`(apt に nsxiv の候補が無い古い配布では sxiv)の
+  **SUDO_REQUEST(exit 3)** で止まる。
+- 管理するパッケージは、**PATH 上で使われている実行ファイルの実体を所有する** nsxiv / sxiv の OS パッケージだけ
+  (`tool_owned`。apt は `dpkg-query -S`、rpm 系は `rpm -qf`)。LATEST は apt のときそのパッケージの候補版、
+  それ以外(パッケージ外で入れたもの・rpm 系)は `ok(latest unknown)`。更新要否の比べ方と `apt-mark hold` の扱い
+  (hold 中は更新・削除の依頼を出さず、何も変えずに exit 1)は ctags-universal と同じ。
+- 導入済みなら install / update のたびに設定同期(`tool_sync`)で key-handler を **nsxiv と sxiv の両方**へ置き、`chmod 755` する:
+  `~/.config/nsxiv/exec/key-handler`、`~/.config/sxiv/exec/key-handler`(依頼どおり `~/.config` 固定。`XDG_CONFIG_HOME`
+  は見ないので、それを設定した環境では nsxiv / sxiv がこの key-handler を読まない)。
+  中身は **`C-d` だけ**(Ctrl-x → Ctrl-d で、stdin で渡るマーク済み、無ければ表示中のファイルを `rm -f`。復元不可。
+  `-0` 起動時の NUL 区切りも読む)。
+- 管理するのは管理行 `# managed-by: combo-linux-tool-setup nsxiv` を含む通常ファイルの key-handler だけ。管理行の無い既存ファイル
+  (リンク切れを含む symlink も)がどちらかにあれば、**何も変えずに失敗**する(ユーザーの key-handler を上書きしない。
+  手で C-d を足すか、退避してから再実行)。中身が同じなら書き換えない(冪等)。
+- remove はパッケージ削除(`apt-get remove -y nsxiv|sxiv` 等)を SUDO_REQUEST で依頼して止まる(key-handler はまだ消さない)。
+  ユーザーが依頼を実行して再実行すると、パッケージが無く key-handler だけ残っているので、管理行つきの key-handler を後始末する。
+- 動作確認は `HOME=<scratch>/home` と、`nsxiv 32`(または `sxiv 26`)を出す偽の実行ファイルを PATH 先頭に置いて隔離して行う。
+  key-handler に C-d(改行区切り・NUL 区切り)と別のキーを実際に渡し、消える/残るを確かめる。
 
 ---
 
