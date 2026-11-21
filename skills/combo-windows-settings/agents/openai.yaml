@@ -1,0 +1,4 @@
+interface:
+  display_name: "Windows Settings"
+  short_description: "Check and apply grouped Windows settings (power/sleep, system sound, delivery optimization, search index, startup apps)"
+  default_prompt: "Use $combo-windows-settings to check the Windows setting groups and guide me through the ones that are not applied."

@@ -1,0 +1,11 @@
+# check.ps1 — 読み取り専用。設定を変えるコマンドは書かない(winsettings.sh lint が検査する)。
+# prelude.ps1 の関数が使える:
+#   Emit <OK|NG|MANUAL|INFO> <item> [detail]  結果 1 行を出す(item は README の表と揃える)
+#   Opt <WINSET_名前> [既定値]               winsettings.sh が注入する任意設定を読む
+#   RegVal <レジストリパス> <値の名前>        値(無ければ $null)
+# 自動で読めない項目は MANUAL、判定に使わない参考情報は INFO で出す。
+
+$v = RegVal 'HKCU:\Software\<path>' '<Name>'
+if ($null -eq $v) { Emit MANUAL '<item>' '値が無い。画面で確認' }
+elseif ($v -eq 0) { Emit OK '<item>' '0' }
+else { Emit NG '<item>' "$v(期待値 0)" }
